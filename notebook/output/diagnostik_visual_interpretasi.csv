@@ -1,8 +1,0 @@
-Vila,Tren Residual,Mean (≈0),Std Dev,Skewness,Interpretasi Skew,Kurtosis,Interpretasi Kurt,Shapiro-Wilk p,Normalitas (SW),Jarque-Bera p,Normalitas (JB),Ljung-Box p,Autokorelasi,% Lag Signifikan
-Briana Villas,Tidak Ada Tren ✅,0.6309,27.0904,-1.4841,Sangat Miring ❌,5.2034,Sangat Runcing/Datar ❌,0.0000,Tidak Normal ⚠️,0.0000,Tidak Normal ⚠️,0.8887,Tidak Ada Autokorelasi ✅,5.0%
-Castello Villas,Tidak Ada Tren ✅,0.4058,17.4294,-1.2898,Sangat Miring ❌,18.3668,Sangat Runcing/Datar ❌,0.0000,Tidak Normal ⚠️,0.0000,Tidak Normal ⚠️,0.0000,Ada Autokorelasi ⚠️,22.5%
-Elina Villas,Tidak Ada Tren ✅,0.0305,27.4715,0.1055,Simetris ✅,7.6393,Sangat Runcing/Datar ❌,0.0000,Tidak Normal ⚠️,0.0000,Tidak Normal ⚠️,0.0007,Ada Autokorelasi ⚠️,20.0%
-Isola Villas,Tidak Ada Tren ✅,0.9128,29.6854,-0.8978,Agak Miring ⚠️,3.9381,Sangat Runcing/Datar ❌,0.0000,Tidak Normal ⚠️,0.0000,Tidak Normal ⚠️,0.9448,Tidak Ada Autokorelasi ✅,10.0%
-Eindra Villas,Tidak Ada Tren ✅,0.8161,18.5977,-1.9597,Sangat Miring ❌,16.3762,Sangat Runcing/Datar ❌,0.0000,Tidak Normal ⚠️,0.0000,Tidak Normal ⚠️,0.8690,Tidak Ada Autokorelasi ✅,17.5%
-Esha Villas,Tidak Ada Tren ✅,0.0307,26.4484,-1.3431,Sangat Miring ❌,5.8844,Sangat Runcing/Datar ❌,0.0000,Tidak Normal ⚠️,0.0000,Tidak Normal ⚠️,0.9500,Tidak Ada Autokorelasi ✅,7.5%
-Ozamiz Villas,Tidak Ada Tren ✅,-0.0034,14.2263,-3.5370,Sangat Miring ❌,31.0303,Sangat Runcing/Datar ❌,0.0000,Tidak Normal ⚠️,0.0000,Tidak Normal ⚠️,0.0056,Ada Autokorelasi ⚠️,20.0%
