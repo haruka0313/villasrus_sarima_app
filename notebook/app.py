@@ -1,14 +1,3 @@
-"""
-Sistem Prediksi Tingkat Hunian Vila — PT Bali Cipta Vila Mandiri
-SARIMA Forecasting + Integrated Price-Occupancy Analysis
-
-Versi: Supabase (PostgreSQL) — menggantikan SQLite
-
-Instalasi:
-    pip install streamlit pandas numpy statsmodels pmdarima scikit-learn scipy plotly supabase python-dotenv
-    streamlit run app.py
-"""
-
 # ══════════════════════════════════════════════════════════════
 # IMPORTS
 # ══════════════════════════════════════════════════════════════
@@ -32,7 +21,6 @@ from plotly.subplots import make_subplots
 from scipy import stats
 from scipy.signal import periodogram as scipy_periodogram
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.stats.diagnostic import acorr_ljungbox
 from statsmodels.tsa.seasonal import seasonal_decompose
 from statsmodels.tsa.statespace.sarimax import SARIMAX
@@ -64,7 +52,8 @@ ACF_ALPHA              = 0.10
 FALLBACK_M             = 12
 SESSION_DURATION_HOURS = 24 * 30
 
-SESSION_KEY = "_sess_token"
+SESSION_KEY  = "_sess_token"
+MODEL_BUCKET = "sarima-models"
 
 LOGO_URL = "https://storage.googleapis.com/villasrus/public/images/logo/villasrus-311x256.webp"
 
@@ -92,8 +81,6 @@ FINANCIAL_ATTRS = [
     "room_revenue", "daily_revenue", "average_daily_rate",
     "revpar", "revenue_per_guest"
 ]
-
-MODEL_BUCKET = "sarima-models"  # Supabase Storage bucket untuk model .pkl
 
 
 # ══════════════════════════════════════════════════════════════
@@ -128,7 +115,6 @@ def init_db():
     """Seed data awal ke Supabase jika belum ada."""
     sb = get_supabase()
 
-    # Seed admin jika users kosong
     users = sb.table("users").select("id").limit(1).execute()
     if not users.data:
         sb.table("users").insert({
@@ -137,7 +123,6 @@ def init_db():
             "role": "admin"
         }).execute()
 
-    # Seed villa_config jika kosong
     villas = sb.table("villa_config").select("villa").limit(1).execute()
     if not villas.data:
         sb.table("villa_config").insert([
@@ -187,7 +172,6 @@ def db_get_users() -> list[dict]:
 def session_save(token: str, username: str):
     sb = get_supabase()
     expires = time.time() + SESSION_DURATION_HOURS * 3600
-    # Hapus session lama
     sb.table("sessions").delete().eq("username", username).execute()
     sb.table("sessions").insert({
         "token": token,
@@ -211,7 +195,6 @@ def session_load() -> dict | None:
     if not token:
         return None
     now = time.time()
-    # Join sessions + users
     res = sb.table("sessions").select("username, expires").eq("token", token).gt("expires", now).execute()
     if not res.data:
         _session_del(token)
@@ -236,7 +219,6 @@ def _session_del(token: str | None):
     sb = get_supabase()
     if token:
         sb.table("sessions").delete().eq("token", token).execute()
-    # Hapus expired sessions
     sb.table("sessions").delete().lt("expires", time.time()).execute()
 
 # ── Villa Config ──
@@ -258,6 +240,11 @@ def db_delete_villa(villa: str):
     sb.table("villa_config").delete().eq("villa", villa).execute()
     sb.table("raw_data").delete().eq("villa", villa).execute()
     sb.table("models").delete().eq("villa", villa).execute()
+    # Hapus pkl dari Storage
+    try:
+        sb.storage.from_(MODEL_BUCKET).remove([f"{villa}.pkl"])
+    except Exception:
+        pass
 
 # ── Raw Data ──
 def db_save_data(villa: str, dtype: str, filename: str, content: str, rows: int) -> bool:
@@ -333,10 +320,8 @@ def db_save_model(villa: str, info: dict):
     except Exception:
         aic = None
 
-    # Upload pkl ke Supabase Storage
     file_path = f"{villa}.pkl"
     try:
-        # Hapus file lama jika ada
         sb.storage.from_(MODEL_BUCKET).remove([file_path])
     except Exception:
         pass
@@ -346,8 +331,6 @@ def db_save_model(villa: str, info: dict):
         {"content-type": "application/octet-stream"}
     )
 
-    # Simpan metadata ke tabel models
-    existing = sb.table("models").select("villa").eq("villa", villa).execute()
     model_data = {
         "villa": villa,
         "order_str": order_str,
@@ -356,6 +339,7 @@ def db_save_model(villa: str, info: dict):
         "mape": round(info.get("mape", 0), 4),
         "trained_at": datetime.utcnow().isoformat()
     }
+    existing = sb.table("models").select("villa").eq("villa", villa).execute()
     if existing.data:
         sb.table("models").update(model_data).eq("villa", villa).execute()
     else:
@@ -363,12 +347,10 @@ def db_save_model(villa: str, info: dict):
 
 def db_load_model(villa: str) -> dict | None:
     sb = get_supabase()
-    # Cek metadata dulu
     res = sb.table("models").select("villa").eq("villa", villa).execute()
     if not res.data:
         return None
     try:
-        # Download pkl dari Storage
         file_path = f"{villa}.pkl"
         pkl_bytes = sb.storage.from_(MODEL_BUCKET).download(file_path)
         return pickle.loads(pkl_bytes)
@@ -425,7 +407,6 @@ def get_model_log() -> list[dict]:
 
 # ══════════════════════════════════════════════════════════════
 # DATA CLEANING & PARSING
-# (Tidak berubah — sama dengan versi SQLite)
 # ══════════════════════════════════════════════════════════════
 
 def _find_col(df: pd.DataFrame, keywords: list[str]) -> str | None:
@@ -526,7 +507,6 @@ def load_all_data(_villa_cfg_json: str) -> tuple[dict, dict]:
 
 # ══════════════════════════════════════════════════════════════
 # ANALISIS STATISTIK
-# (Tidak berubah — sama dengan versi SQLite)
 # ══════════════════════════════════════════════════════════════
 
 def adf_test(series: pd.Series) -> dict:
@@ -620,7 +600,6 @@ def run_detect_m_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFra
 
 # ══════════════════════════════════════════════════════════════
 # SARIMA — TRAINING & FORECAST
-# (Tidak berubah — sama dengan versi SQLite)
 # ══════════════════════════════════════════════════════════════
 
 def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> dict:
@@ -714,7 +693,6 @@ def make_forecast(info: dict) -> dict:
 
 # ══════════════════════════════════════════════════════════════
 # PLOTLY — BASE LAYOUT & CHART FUNCTIONS
-# (Tidak berubah — sama dengan versi SQLite)
 # ══════════════════════════════════════════════════════════════
 
 BASE_LAYOUT = dict(
@@ -1011,19 +989,12 @@ def chart_residual(info: dict) -> go.Figure:
 
 # ══════════════════════════════════════════════════════════════
 # KOMPONEN UI BERSAMA
-# (Tidak berubah — sama dengan versi SQLite)
 # ══════════════════════════════════════════════════════════════
 
 def kpi_card(label: str, value: str, sub: str = "", color: str = "#2563EB"):
     st.markdown(f"""
-        <div style="
-            background: white;
-            border-left: 4px solid {color};
-            border-radius: 8px;
-            padding: 14px 18px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-            margin-bottom: 4px;
-        ">
+        <div style="background:white;border-left:4px solid {color};border-radius:8px;
+                    padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:4px;">
             <div style="font-size:11px;color:#6B7280;font-weight:500;text-transform:uppercase;
                         letter-spacing:0.05em;margin-bottom:2px;">{label}</div>
             <div style="font-size:22px;font-weight:700;color:#111827;">{value}</div>
@@ -1104,16 +1075,12 @@ def filter_occ(clean_occ: dict, ds, de) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════
-# HALAMAN — LOGIN / DASHBOARD / DATA / STRATEGI
-# (Tidak berubah dari versi SQLite — fungsi page_* sama persis)
+# HALAMAN — LOGIN
 # ══════════════════════════════════════════════════════════════
 
 def page_login():
-    st.markdown("""
-    <style>
-    .block-container { max-width: 520px; padding-top: 4rem; }
-    </style>
-    """, unsafe_allow_html=True)
+    st.markdown("<style>.block-container { max-width: 520px; padding-top: 4rem; }</style>",
+                unsafe_allow_html=True)
     st.markdown(
         f"<div style='text-align:center;margin-bottom:16px;'>"
         f"<img src='{LOGO_URL}' style='height:80px;object-fit:contain;'></div>",
@@ -1161,6 +1128,10 @@ def page_login():
                 st.success(msg + " Silakan login.") if ok else st.error(msg)
 
 
+# ══════════════════════════════════════════════════════════════
+# HALAMAN — DASHBOARD UTAMA
+# ══════════════════════════════════════════════════════════════
+
 def page_dashboard(clean_occ: dict, clean_fin: dict, villa_cfg: dict):
     is_admin = st.session_state.user.get("role") == "admin"
     st.markdown(
@@ -1172,14 +1143,14 @@ def page_dashboard(clean_occ: dict, clean_fin: dict, villa_cfg: dict):
         st.warning("⚠️ Belum ada data vila. Upload data melalui menu **Manajemen Data**.")
         return
     section_header("Ringkasan Keseluruhan", "📊")
-    all_means   = [s.resample("MS").mean().mean() for s in clean_occ.values()]
-    global_mean = np.mean(all_means) if all_means else 0
+    all_means    = [s.resample("MS").mean().mean() for s in clean_occ.values()]
+    global_mean  = np.mean(all_means) if all_means else 0
     n_with_model = sum(1 for v in villa_cfg if db_model_exists(v))
     n_with_data  = len(clean_occ)
     c1, c2, c3, c4 = st.columns(4)
     with c1: kpi_card("Total Vila Terdaftar", str(len(villa_cfg)), "unit", "#2563EB")
     with c2: kpi_card("Vila dengan Data", str(n_with_data), "unit aktif", "#059669")
-    with c3: kpi_card("Model Prediksi Siap", str(n_with_model), "villa terlatih",
+    with c3: kpi_card("Model Prediksi Siap", str(n_with_model), "vila terlatih",
                  "#7C3AED" if n_with_model == len(villa_cfg) else "#D97706")
     with c4:
         icon, _, _ = status_badge(global_mean)
@@ -1235,6 +1206,748 @@ def page_dashboard(clean_occ: dict, clean_fin: dict, villa_cfg: dict):
 
 
 # ══════════════════════════════════════════════════════════════
+# HALAMAN — MANAJEMEN DATA (Admin only)
+# ══════════════════════════════════════════════════════════════
+
+def page_manajemen_data(villa_cfg: dict):
+    st.markdown(
+        "<h1 style='color:#1E3A5F;'>📂 Manajemen Data</h1>"
+        "<p style='color:#6B7280;margin-bottom:20px;'>Upload, preview, dan kelola data "
+        "ekspor Beds24 untuk setiap unit vila.</p>",
+        unsafe_allow_html=True)
+    tab_upload, tab_preview, tab_vila, tab_user = st.tabs([
+        "📤 Upload Data", "🔍 Preview & Hapus", "🏡 Kelola Vila", "👥 Kelola User"
+    ])
+
+    # ── Upload ──
+    with tab_upload:
+        section_header("Upload Data CSV dari Beds24", "📤")
+        st.info(
+            "**Format yang diterima:**\n"
+            "- **Operasional (Okupansi):** kolom date, occupancy/booked/available\n"
+            "- **Finansial (Revenue):** kolom date, room_revenue/daily_revenue/ADR/RevPAR\n\n"
+            "Data baru akan **digabung otomatis** dengan data yang sudah ada (tanpa duplikasi)."
+        )
+        with st.form("upload_form"):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                villa_sel = st.selectbox(
+                    "Vila", list(villa_cfg.keys()),
+                    format_func=lambda v: f"{v.replace('_villas','').title()} ({villa_cfg[v]['area'].title()})"
+                )
+            with c2:
+                dtype = st.selectbox(
+                    "Tipe Data", ["occupancy", "financial"],
+                    format_func=lambda x: "Operasional (Okupansi)" if x == "occupancy" else "Finansial (Revenue)"
+                )
+            with c3:
+                uploaded = st.file_uploader("File CSV", type=["csv"])
+            submit = st.form_submit_button("Upload & Simpan", type="primary", use_container_width=True)
+        if submit and uploaded:
+            try:
+                content = uploaded.read().decode("utf-8-sig")
+                df_up   = pd.read_csv(io.StringIO(content), sep=None, engine="python")
+                df_up.columns = df_up.columns.str.strip()
+                date_col = _find_col(df_up, ["date", "tanggal", "tgl"])
+                if not date_col:
+                    st.error("❌ Kolom tanggal tidak ditemukan. Pastikan ada kolom 'Date', 'Tanggal', atau 'Tgl'.")
+                else:
+                    n_rows  = len(df_up)
+                    merged  = db_save_data(villa_sel, dtype, uploaded.name, content, n_rows)
+                    info_   = db_data_info(villa_sel, dtype)
+                    log_upload(st.session_state.user["username"], villa_sel, dtype, uploaded.name, n_rows)
+                    load_all_data.clear()
+                    if merged:
+                        st.success(f"✅ Data digabung. Total: **{info_['rows']:,} baris** tersimpan.")
+                    else:
+                        st.success(f"✅ Data baru disimpan: **{n_rows:,} baris**.")
+                    st.info("💡 Latih model di menu **Strategi Hunian & Harga → Train Model**.")
+            except Exception as e:
+                st.error(f"❌ Gagal memproses: {e}")
+        elif submit and not uploaded:
+            st.warning("Pilih file CSV terlebih dahulu.")
+        section_header("Data Tersimpan", "💾")
+        raw_list = db_list_data()
+        if raw_list:
+            df_list = pd.DataFrame(raw_list)
+            df_list["vila"] = df_list["villa"].str.replace("_villas", "").str.title()
+            df_list["tipe"] = df_list["data_type"].map({"occupancy": "Operasional", "financial": "Finansial"})
+            st.dataframe(
+                df_list[["vila", "tipe", "filename", "rows", "uploaded"]].rename(columns={
+                    "vila": "Vila", "tipe": "Tipe", "filename": "File",
+                    "rows": "Baris", "uploaded": "Waktu Upload"
+                }),
+                use_container_width=True, hide_index=True)
+        else:
+            st.info("Belum ada data tersimpan di database.")
+
+    # ── Preview & Hapus ──
+    with tab_preview:
+        section_header("Preview Data", "🔍")
+        c1, c2 = st.columns(2)
+        with c1:
+            prev_villa = st.selectbox("Vila", list(villa_cfg.keys()),
+                format_func=lambda v: v.replace("_villas", "").title(), key="prev_villa")
+        with c2:
+            prev_type = st.selectbox("Tipe Data", ["occupancy", "financial"],
+                format_func=lambda x: "Operasional" if x == "occupancy" else "Finansial",
+                key="prev_type")
+        df_prev = db_load_data(prev_villa, prev_type)
+        if df_prev is not None:
+            info_p = db_data_info(prev_villa, prev_type)
+            st.caption(f"**{info_p['rows']:,} baris** | File: {info_p['filename']} | Upload: {info_p['uploaded']}")
+            st.dataframe(df_prev.head(100), use_container_width=True)
+            col_dl, col_del = st.columns([3, 1])
+            with col_dl:
+                st.download_button(
+                    "⬇️ Download CSV",
+                    df_prev.to_csv(index=False).encode("utf-8"),
+                    f"{prev_villa}_{prev_type}.csv", "text/csv",
+                    use_container_width=True)
+            with col_del:
+                if st.button("🗑️ Hapus Data", type="secondary", use_container_width=True,
+                             key=f"del_{prev_villa}_{prev_type}"):
+                    db_delete_data(prev_villa, prev_type)
+                    load_all_data.clear()
+                    st.success("✅ Data dihapus.")
+                    st.rerun()
+        else:
+            st.info(f"Belum ada data **{prev_type}** untuk **{prev_villa.replace('_villas','').title()}**.")
+        section_header("Log Upload", "📋")
+        logs = get_upload_log()
+        if logs:
+            st.dataframe(pd.DataFrame(logs), use_container_width=True, hide_index=True)
+
+    # ── Kelola Vila ──
+    with tab_vila:
+        section_header("Tambah Vila Baru", "➕")
+        with st.form("add_villa"):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                new_name  = st.text_input("Nama Vila", placeholder="contoh: sunrise_villas")
+            with c2:
+                new_area  = st.selectbox("Area", ["canggu", "seminyak", "ubud", "uluwatu", "lainnya"])
+            with c3:
+                used_c  = {v["color"] for v in villa_cfg.values()}
+                avail_c = [c for c in VILLA_COLORS if c not in used_c] or VILLA_COLORS
+                new_color = st.color_picker("Warna", value=avail_c[0])
+            add_btn = st.form_submit_button("Tambah Vila", type="primary")
+        if add_btn:
+            nc = new_name.strip().lower().replace(" ", "_")
+            if not nc:
+                st.error("Nama vila tidak boleh kosong.")
+            elif nc in villa_cfg:
+                st.warning(f"`{nc}` sudah ada.")
+            else:
+                db_save_villa(nc, new_area, new_color)
+                st.session_state.villa_config[nc] = {"area": new_area, "color": new_color}
+                load_all_data.clear()
+                st.success(f"✅ Vila `{nc}` ditambahkan.")
+                st.rerun()
+        section_header("Daftar Vila", "📋")
+        rows_v = [{
+            "Villa":      v,
+            "Area":       cfg["area"].title(),
+            "Data":       "✅" if db_data_info(v, "financial") or db_data_info(v, "occupancy") else "❌",
+            "Model":      "✅" if db_model_exists(v) else "❌",
+            "Diperbarui": db_model_trained_at(v),
+        } for v, cfg in villa_cfg.items()]
+        st.dataframe(pd.DataFrame(rows_v), use_container_width=True, hide_index=True)
+        with st.expander("🗑️ Hapus Vila", expanded=False):
+            del_v = st.selectbox("Pilih vila untuk dihapus", list(villa_cfg.keys()),
+                format_func=lambda v: f"{v} ({villa_cfg[v]['area'].title()})")
+            if st.button("Hapus Vila (beserta data & model)", type="secondary"):
+                db_delete_villa(del_v)
+                del st.session_state.villa_config[del_v]
+                load_all_data.clear()
+                st.success(f"Vila `{del_v}` dihapus.")
+                st.rerun()
+
+    # ── Kelola User ──
+    with tab_user:
+        section_header("Daftar User", "👥")
+        st.dataframe(pd.DataFrame(db_get_users()), use_container_width=True, hide_index=True)
+        section_header("Tambah User Baru", "➕")
+        with st.form("add_user"):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                nu = st.text_input("Username")
+            with c2:
+                np_ = st.text_input("Password", type="password")
+            with c3:
+                role_ = st.selectbox("Role", ["user", "admin"],
+                    help="Admin: akses penuh | User: hanya insight bisnis")
+            add_u = st.form_submit_button("Tambah User", type="primary")
+        if add_u:
+            ok, msg = db_register(nu, np_, role_)
+            st.success(msg) if ok else st.error(msg)
+        section_header("Log Sistem", "📋")
+        lt1, lt2 = st.tabs(["Log Upload", "Log Training"])
+        with lt1:
+            logs_u = get_upload_log()
+            st.dataframe(pd.DataFrame(logs_u) if logs_u else pd.DataFrame(),
+                         use_container_width=True, hide_index=True)
+        with lt2:
+            logs_m = get_model_log()
+            st.dataframe(pd.DataFrame(logs_m) if logs_m else pd.DataFrame(),
+                         use_container_width=True, hide_index=True)
+
+
+# ══════════════════════════════════════════════════════════════
+# HALAMAN — STRATEGI HUNIAN & HARGA
+# ══════════════════════════════════════════════════════════════
+
+def page_strategi(
+    clean_occ: dict, clean_fin: dict,
+    sarima_models: dict, fore_info_all: dict,
+    villa_cfg: dict, villa_d: dict, villa_m: dict,
+    selected_villas: list,
+):
+    is_admin = st.session_state.user.get("role") == "admin"
+    st.markdown(
+        "<h1 style='color:#1E3A5F;'>📊 Strategi Hunian & Harga</h1>"
+        "<p style='color:#6B7280;margin-bottom:20px;'>"
+        "Prediksi tingkat hunian SARIMA dan analisis keterkaitan harga historis (ADR).</p>",
+        unsafe_allow_html=True)
+
+    if is_admin:
+        tabs = st.tabs([
+            "🔭 Prediksi & Strategi",
+            "🔬 Analisis Teknis (EDA)",
+            "🤖 Analisis per Vila",
+            "🚀 Train Model",
+        ])
+    else:
+        tabs = st.tabs([
+            "🔭 Prediksi & Strategi",
+            "💰 Analisis Harga",
+        ])
+
+    # ─── TAB: PREDIKSI & STRATEGI ───
+    with tabs[0]:
+        section_header("Filter Periode Historis", "🗓️")
+        ds, de = period_filter(clean_occ, "strat")
+        clean_occ_f = filter_occ(clean_occ, ds, de)
+        st.divider()
+
+        # CEK: Apakah ada model yang tersedia?
+        if not sarima_models:
+            st.warning("⚠️ **Model Prediksi Belum Tersedia**")
+
+            col1, col2 = st.columns([1, 1])
+
+            with col1:
+                if is_admin:
+                    st.markdown("""
+                    ### 🔧 Panduan untuk Admin
+
+                    **Langkah-langkah melatih model:**
+
+                    1. ✅ **Upload Data Okupansi**
+                       Buka menu **📂 Manajemen Data** → tab **📤 Upload Data**
+
+                    2. ✅ **Latih Model SARIMA**
+                       Buka tab **🚀 Train Model** (tab paling kanan di halaman ini)
+
+                    3. ✅ **Pilih Vila & Mulai Training**
+                       Centang vila yang ingin dilatih → Klik **🚀 Mulai Training**
+
+                    4. ✅ **Refresh Halaman**
+                       Setelah training selesai, refresh untuk melihat prediksi
+                    """)
+                else:
+                    st.info("""
+                    💡 **Untuk melihat prediksi hunian:**
+
+                    Hubungi administrator untuk melatih model prediksi SARIMA.
+
+                    Administrator perlu:
+                    - Upload data okupansi historis
+                    - Melatih model untuk setiap vila
+                    """)
+
+            with col2:
+                st.markdown("### 📊 Status Vila Saat Ini")
+
+                for villa in selected_villas:
+                    has_data = villa in clean_occ
+                    has_model = db_model_exists(villa)
+                    villa_name = villa.replace("_villas", "").title()
+
+                    if has_data and has_model:
+                        status = "✅ Siap (Data + Model)"
+                        color_bg = "#DCFCE7"
+                    elif has_data and not has_model:
+                        status = "⚠️ Perlu Training"
+                        color_bg = "#FEF9C3"
+                    elif not has_data and has_model:
+                        status = "⚠️ Data Hilang"
+                        color_bg = "#FEE2E2"
+                    else:
+                        status = "❌ Belum Ada Data"
+                        color_bg = "#FEE2E2"
+
+                    st.markdown(f"""
+                    <div style="background:{color_bg};border-radius:8px;padding:8px 12px;margin-bottom:6px;">
+                        <strong>{villa_name}</strong><br>
+                        <span style="font-size:12px;">{status}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                # Ringkasan
+                n_ready = sum(1 for v in selected_villas if v in sarima_models)
+                n_total = len(selected_villas)
+                st.divider()
+                st.metric("Model Siap", f"{n_ready}/{n_total} vila")
+
+        # JIKA MODEL TERSEDIA - tampilkan prediksi
+        else:
+            section_header(f"Prediksi Hunian +{FORECAST_STEPS} Bulan ke Depan", "🔭")
+            n_cols_sum = min(len(selected_villas), 4)
+            sum_cols   = st.columns(n_cols_sum)
+
+            for i, villa in enumerate([v for v in selected_villas if v in sarima_models]):
+                info = sarima_models[villa]
+                fore = fore_info_all.get(villa, {})
+                if not fore:
+                    continue
+                avg_f = fore["fore_mean"].mean()
+                icon, label, bg = status_badge(avg_f)
+                with sum_cols[i % n_cols_sum]:
+                    st.markdown(f"""
+                        <div style="background:{bg};border-radius:10px;padding:12px;text-align:center;margin-bottom:8px;">
+                            <div style="font-size:14px;">{icon}</div>
+                            <div style="font-weight:700;font-size:20px;color:#111827;">{avg_f:.0f}%</div>
+                            <div style="font-size:12px;font-weight:600;color:#374151;">{info['title']}</div>
+                            <div style="font-size:11px;color:#6B7280;">{label}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ─── GRAFIK FORECAST PER VILA (BAGIAN YANG HILANG) ───
+            section_header("Grafik Forecast per Vila", "📈")
+
+            for villa in selected_villas:
+                if villa not in sarima_models:
+                    continue
+
+                info = sarima_models[villa]
+                fore = fore_info_all.get(villa)
+
+                if not fore:
+                    continue
+
+                # Tampilkan grafik forecast
+                fig_forecast = chart_forecast(info, fore)
+                st.plotly_chart(fig_forecast, use_container_width=True)
+
+                # Tabel prediksi detail
+                with st.expander(f"📊 Detail Prediksi {info['title']}", expanded=False):
+                    forecast_df = pd.DataFrame({
+                        "Bulan": fore["fore_mean"].index.strftime("%b %Y"),
+                        "Prediksi (%)": fore["fore_mean"].values.round(1),
+                        "Lower Bound (%)": fore["fore_ci"].iloc[:, 0].values.round(1),
+                        "Upper Bound (%)": fore["fore_ci"].iloc[:, 1].values.round(1),
+                    })
+
+                    col1, col2 = st.columns([2, 1])
+
+                    with col1:
+                        st.dataframe(forecast_df, use_container_width=True, hide_index=True)
+
+                    with col2:
+                        st.metric("Rata-rata Prediksi", f"{fore['fore_mean'].mean():.1f}%")
+                        st.metric("Std Deviasi", f"{fore['fore_mean'].std():.1f}%")
+                        if fore['is_flat']:
+                            st.warning("⚠️ Prediksi flat - model tidak menangkap pola musiman")
+                        else:
+                            st.success("✅ Model menangkap variasi musiman")
+
+            st.divider()
+
+    # ─── Fungsi render tab Analisis Harga (dipakai di 2 tempat) ───
+    def render_harga_tab():
+        section_header("Keterkaitan Okupansi & Revenue (ADR)", "💰")
+        if not clean_fin:
+            st.info("📂 Data finansial belum diupload. Upload file revenue di **Manajemen Data**.")
+            return
+        fig_sc = chart_scatter_occ_rev(clean_occ, clean_fin, villa_cfg)
+        if fig_sc:
+            st.plotly_chart(fig_sc, use_container_width=True)
+            st.caption(
+                "**Interpretasi:** Nilai **r mendekati +1** = hubungan positif kuat antara hunian & revenue. "
+                "**p < 0.05** = hubungan signifikan secara statistik.")
+        else:
+            st.info("Data tidak cukup untuk menampilkan scatter plot.")
+        section_header("Statistik Revenue Historis", "📋")
+        fin_rows = []
+        for villa, rev in clean_fin.items():
+            if villa not in selected_villas:
+                continue
+            fin_rows.append({
+                "Vila":          villa.replace("_villas", "").title(),
+                "Area":          villa_cfg.get(villa, {}).get("area", "").title(),
+                "N Bulan":       len(rev),
+                "Total Revenue": f"Rp {rev.sum():,.0f}",
+                "Rata-rata/Bln": f"Rp {rev.mean():,.0f}",
+                "Median/Bln":    f"Rp {rev.median():,.0f}",
+                "Tertinggi":     f"Rp {rev.max():,.0f}",
+            })
+        if fin_rows:
+            st.dataframe(pd.DataFrame(fin_rows), use_container_width=True, hide_index=True)
+        section_header("Tren Revenue Bulanan (ADR Proxy)", "📈")
+        fig_rev = go.Figure()
+        for villa, rev in clean_fin.items():
+            if villa not in selected_villas:
+                continue
+            color = villa_cfg.get(villa, {}).get("color", "#2563EB")
+            rev_m = rev / 1e6
+            fig_rev.add_trace(go.Scatter(
+                x=rev_m.index, y=rev_m.values,
+                line=dict(color=color, width=2), mode="lines+markers", marker=dict(size=4),
+                name=villa.replace("_villas", "").title(),
+                hovertemplate="<b>%{fullData.name}</b><br>%{x|%b %Y}: Rp%{y:.1f}M<extra></extra>",
+            ))
+        apply_base(fig_rev,
+            title=dict(text="Revenue Bulanan per Vila (Juta IDR)", font=dict(size=13, color="#1E3A5F")),
+            yaxis=dict(title="Revenue (Juta IDR)", gridcolor="#F3F4F6"),
+            height=340,
+            legend=dict(bgcolor="rgba(255,255,255,0.9)", bordercolor="#E5E7EB", borderwidth=1),
+        )
+        st.plotly_chart(fig_rev, use_container_width=True)
+
+    if not is_admin:
+        with tabs[1]:
+            render_harga_tab()
+
+    # ─── TAB: EDA (Admin only) ───
+    if is_admin:
+        with tabs[1]:
+            section_header("Exploratory Data Analysis — Time Series Bulanan", "🔬")
+            ds_e, de_e = period_filter(clean_occ, "eda")
+            clean_occ_e = filter_occ(clean_occ, ds_e, de_e)
+            st.divider()
+            eda_rows = []
+            for villa, series in clean_occ_e.items():
+                if villa not in selected_villas:
+                    continue
+                monthly = series.resample("MS").mean().dropna()
+                eda_rows.append({
+                    "Vila":       villa.replace("_villas", "").title(),
+                    "Area":       villa_cfg.get(villa, {}).get("area", "").title(),
+                    "N (bln)":    len(monthly),
+                    "Mean (%)":   round(monthly.mean(), 2),
+                    "Std (%)":    round(monthly.std(),  2),
+                    "Min (%)":    round(monthly.min(),  2),
+                    "Max (%)":    round(monthly.max(),  2),
+                    "Median (%)": round(monthly.median(), 2),
+                    "Mulai":      monthly.index.min().strftime("%b %Y"),
+                    "Akhir":      monthly.index.max().strftime("%b %Y"),
+                })
+            if eda_rows:
+                st.dataframe(pd.DataFrame(eda_rows), use_container_width=True, hide_index=True)
+            section_header("Distribusi Ocupansi Bulanan per Vila", "📊")
+            for villa in selected_villas:
+                if villa not in clean_occ_e:
+                    continue
+                series  = clean_occ_e[villa]
+                color   = villa_cfg.get(villa, {}).get("color", "#2563EB")
+                title_v = villa.replace("_villas", "").title()
+                monthly = series.resample("MS").mean()
+                mean_v  = monthly.mean()
+                bar_colors = [color if v >= mean_v else hex_rgba(color, 0.5) for v in monthly.values]
+                fig_e = go.Figure()
+                fig_e.add_trace(go.Bar(
+                    x=monthly.index, y=monthly.values,
+                    marker_color=bar_colors, marker_line_width=0,
+                    text=[f"{v:.0f}%" for v in monthly.values],
+                    textposition="outside", textfont=dict(size=8),
+                    hovertemplate="<b>%{x|%b %Y}</b><br>Ocupansi: %{y:.1f}%<extra></extra>",
+                ))
+                fig_e.add_hline(y=mean_v, line_dash="dash", line_color="#EF4444",
+                    annotation_text=f"Mean: {mean_v:.1f}%",
+                    annotation_position="top right",
+                    annotation_font=dict(color="#EF4444", size=10))
+                apply_base(fig_e,
+                    title=dict(text=f"{title_v} — Distribusi Bulanan",
+                               font=dict(size=13, color="#1E3A5F")),
+                    yaxis=dict(title="Ocupansi (%)", range=[0, 120],
+                               ticksuffix="%", gridcolor="#F3F4F6"),
+                    height=260, showlegend=False,
+                    margin=dict(l=60, r=30, t=60, b=60),
+                )
+                fig_e.update_xaxes(tickangle=-45, tickvals=monthly.index,
+                    ticktext=[d.strftime("%b %Y") for d in monthly.index])
+                st.plotly_chart(fig_e, use_container_width=True)
+            render_harga_tab()
+
+        # ─── TAB: ANALISIS PER VILA (Admin only) ───
+        with tabs[2]:
+            section_header("Analisis Mendalam per Vila", "🏡")
+            st.markdown(
+                "Setiap vila menampilkan 4 sub-analisis: "
+                "**Dekomposisi → ADF & Siklus → ACF/PACF → Hasil Model**.")
+            st.divider()
+            for villa in selected_villas:
+                if villa not in clean_occ:
+                    continue
+                info    = sarima_models.get(villa)
+                monthly = clean_occ[villa].resample("MS").mean().dropna()
+                color   = villa_cfg.get(villa, {}).get("color", "#2563EB")
+                title_v = villa.replace("_villas", "").title()
+                area    = villa_cfg.get(villa, {}).get("area", "").title()
+                d_val   = villa_d.get(villa, 1)
+                m_val   = villa_m.get(villa, 12)
+                mean_occ = monthly.mean()
+                n_months = len(monthly)
+                occ_icon, occ_lbl, _ = status_badge(mean_occ)
+                mq_icon, mq_lbl      = model_quality_badge(info.get("mape", float("nan")) if info else float("nan"))
+                label_exp = (
+                    f"**{title_v}** · {area} · {occ_icon} {occ_lbl} ({mean_occ:.1f}%) · "
+                    f"{n_months} bln · d={d_val} m={m_val}"
+                    + (f" · {mq_icon} {mq_lbl}" if info else "")
+                )
+                with st.expander(label_exp, expanded=False):
+                    c1, c2, c3, c4, c5 = st.columns(5)
+                    c1.metric("Rata-rata Ocupansi", f"{mean_occ:.1f}%")
+                    c2.metric("Data Historis",      f"{n_months} bln")
+                    c3.metric("d (differencing)",   str(d_val))
+                    c4.metric("m (seasonality)",    str(m_val))
+                    if info:
+                        c5.metric("RMSE Model", f"{info.get('rmse', 0):.1f}%")
+                    st.divider()
+                    t1, t2, t3, t4 = st.tabs([
+                        "📈 Dekomposisi", "🔬 ADF & Siklus", "📉 ACF/PACF", "🤖 Hasil Model"
+                    ])
+                    with t1:
+                        if n_months < 24:
+                            st.warning("⚠️ Data kurang dari 24 bulan — dekomposisi tidak tersedia.")
+                        else:
+                            fig_d = chart_decomposition(monthly, m_val, color, title_v)
+                            if fig_d:
+                                st.plotly_chart(fig_d, use_container_width=True)
+                            try:
+                                decomp = seasonal_decompose(monthly, model="additive", period=m_val,
+                                                            extrapolate_trend="freq")
+                                slope  = np.polyfit(range(len(decomp.trend.dropna())),
+                                                    decomp.trend.dropna().values, 1)[0]
+                                s_str  = decomp.seasonal.std() / decomp.observed.std() * 100
+                                r_str  = decomp.resid.dropna().std() / decomp.observed.std() * 100
+                                cd1, cd2, cd3 = st.columns(3)
+                                cd1.metric("Arah Tren",
+                                    "📈 Naik" if slope > 0.05 else ("📉 Turun" if slope < -0.05 else "➡️ Datar"),
+                                    f"{slope:+.2f}%/bln")
+                                cd2.metric("Kekuatan Musiman", f"{s_str:.1f}%",
+                                    "Kuat" if s_str > 20 else "⚠️ Lemah")
+                                cd3.metric("Noise (Residual)", f"{r_str:.1f}%",
+                                    "✅ Rendah" if r_str < 30 else "⚠️ Tinggi")
+                                parts = []
+                                if slope > 0.05:
+                                    parts.append(f"Tren **naik** ({slope:+.2f}%/bln) — hunian cenderung meningkat.")
+                                elif slope < -0.05:
+                                    parts.append(f"Tren **turun** ({slope:+.2f}%/bln) — perlu strategi untuk menahan penurunan.")
+                                else:
+                                    parts.append("Tren **stabil** tanpa perubahan signifikan.")
+                                if s_str > 20:
+                                    parts.append(f"Pola musiman **kuat** ({s_str:.1f}%) — siklus m={m_val} bln terkonfirmasi.")
+                                else:
+                                    parts.append(f"Pola musiman **lemah** ({s_str:.1f}%) — SARIMA mungkin kurang presisi.")
+                                if r_str < 30:
+                                    parts.append(f"Noise rendah ({r_str:.1f}%) — model menjelaskan sebagian besar variasi.")
+                                else:
+                                    parts.append(f"Noise tinggi ({r_str:.1f}%) — ada faktor eksternal yang belum tertangkap.")
+                                st.info("💡 " + "  \n".join(parts))
+                            except Exception:
+                                pass
+                    with t2:
+                        res0 = adf_test(monthly)
+                        ca1, ca2 = st.columns(2)
+                        with ca1:
+                            st.markdown("#### Hasil Uji ADF")
+                            st.dataframe(pd.DataFrame([
+                                {"Parameter": "ADF Statistic", "Nilai": f"{res0['statistic']:.4f}"},
+                                {"Parameter": "p-value",       "Nilai": f"{res0['pvalue']:.4f}"},
+                                {"Parameter": "Stasioner?",    "Nilai": "✅ Ya" if res0["stationary"] else "❌ Tidak"},
+                                {"Parameter": "d digunakan",   "Nilai": str(d_val)},
+                                *[{"Parameter": f"CV {k}", "Nilai": str(v)} for k, v in res0["critical"].items()],
+                            ]), use_container_width=True, hide_index=True)
+                            if res0["stationary"]:
+                                st.success(f"✅ Data sudah stasioner (p={res0['pvalue']:.3f}). d=0.")
+                            else:
+                                st.info(f"📌 Belum stasioner (p={res0['pvalue']:.3f}) → 1× differencing → d={d_val}.")
+                        with ca2:
+                            st.markdown("#### Deteksi Periode Musiman (Periodogram)")
+                            freqs, power = scipy_periodogram(monthly.values)
+                            valid   = freqs[1:] > 0
+                            periods = 1.0 / freqs[1:][valid]
+                            pwr     = power[1:][valid]
+                            fig_pg  = go.Figure()
+                            fig_pg.add_trace(go.Scatter(x=periods, y=pwr,
+                                fill="tozeroy", fillcolor="rgba(156,163,175,0.15)",
+                                line=dict(color="#9CA3AF", width=1.5),
+                                hovertemplate="Periode: %{x:.1f} bln<br>Power: %{y:.0f}<extra></extra>"))
+                            fig_pg.add_vline(x=m_val, line_color=color, line_width=2.5, line_dash="dash")
+                            fig_pg.add_annotation(x=m_val, y=0.85, xref="x", yref="paper",
+                                text=f"m={m_val}", showarrow=True, arrowhead=2,
+                                font=dict(color=color, size=12), bgcolor="white", borderpad=3)
+                            fig_pg.update_layout(height=220,
+                                xaxis=dict(title="Periode (bulan)", range=[1, 37], gridcolor="#F3F4F6"),
+                                yaxis=dict(title="Spectral Power", gridcolor="#F3F4F6"),
+                                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(248,250,252,1)",
+                                font=dict(family="DM Sans, sans-serif", size=11),
+                                margin=dict(l=50, r=30, t=20, b=40))
+                            st.plotly_chart(fig_pg, use_container_width=True)
+                    with t3:
+                        fig_ap = chart_acf_pacf(monthly, m_val, color, title_v)
+                        st.plotly_chart(fig_ap, use_container_width=True)
+                        n = len(monthly)
+                        conf = 1.96 / np.sqrt(n)
+                        acf_v, _ = sm_acf(monthly, nlags=min(36, n - 1), fft=True, alpha=0.05)
+                        pac_v, _ = sm_pacf(monthly, nlags=min(36, n // 2 - 1), alpha=0.05)
+                        sig_acf  = [i for i, v in enumerate(acf_v[1:], 1) if abs(v) > conf]
+                        sig_pacf = [i for i, v in enumerate(pac_v[1:], 1) if abs(v) > conf]
+                        c_a, c_p = st.columns(2)
+                        with c_a:
+                            st.markdown("**Lag signifikan ACF:**")
+                            if sig_acf:
+                                st.write(", ".join([f"`{l}`" for l in sig_acf[:12]]))
+                                if any(l % m_val == 0 for l in sig_acf[:18]):
+                                    st.success(f"✅ Lag kelipatan {m_val} signifikan → pola musiman terkonfirmasi")
+                            else:
+                                st.info("Tidak ada lag signifikan")
+                        with c_p:
+                            st.markdown("**Lag signifikan PACF:**")
+                            if sig_pacf:
+                                st.write(", ".join([f"`{l}`" for l in sig_pacf[:12]]))
+                            else:
+                                st.info("Tidak ada lag signifikan")
+                        st.caption(f"Threshold: ±{conf:.3f} | ACF truncate tajam → MA(q) | PACF truncate tajam → AR(p)")
+                    with t4:
+                        if not info:
+                            st.info("⏳ Model belum dilatih. Gunakan tab **Train Model**.")
+                        else:
+                            p, d_o, q    = info["order"]
+                            P, D, Q, ms  = info["seasonal_order"]
+                            cm1, cm2, cm3, cm4 = st.columns(4)
+                            cm1.metric("Order",    f"({p},{d_o},{q})")
+                            cm2.metric("Seasonal", f"({P},{D},{Q})[{ms}]")
+                            cm3.metric("AIC",      f"{info['model'].aic:.1f}")
+                            cm4.metric("RMSE",     f"{info.get('rmse', 0):.2f}%")
+                            st.plotly_chart(chart_model_fit(info), use_container_width=True)
+                            st.plotly_chart(chart_residual(info), use_container_width=True)
+                            st.markdown("**Interpretasi Model untuk Bisnis:**")
+                            pts = []
+                            if p  > 0: pts.append(f"**AR({p})**: Hunian dipengaruhi **{p} bulan sebelumnya**")
+                            if d_o > 0: pts.append(f"**I({d_o})**: Data di-differencing agar stasioner")
+                            if q  > 0: pts.append(f"**MA({q})**: Koreksi dari {q} error prediksi sebelumnya")
+                            if P > 0 or Q > 0:
+                                pts.append(f"**Seasonal ({P},{D},{Q})[{ms}]**: Pola musiman tiap {ms} bulan ditangkap")
+                            for pt in pts:
+                                st.markdown(f"- {pt}")
+                            mape_v = info.get("mape", float("nan"))
+                            rmse_v = info.get("rmse", 0)
+                            mq_i, mq_l = model_quality_badge(mape_v)
+                            if not np.isnan(mape_v) and mape_v < 20:
+                                st.success(f"{mq_i} {mq_l} | RMSE={rmse_v:.1f}%")
+                            elif not np.isnan(mape_v) and mape_v < 30:
+                                st.warning(f"{mq_i} {mq_l} | RMSE={rmse_v:.1f}%")
+                            else:
+                                st.error(f"{mq_i} Pertimbangkan retrain atau tambah data historis.")
+
+        # ─── TAB: TRAIN MODEL (Admin only) ───
+        with tabs[3]:
+            section_header("Training Model SARIMA", "🚀")
+            st.markdown(
+                "Model dilatih menggunakan **Auto ARIMA** untuk menemukan order `(p,d,q)(P,D,Q)[m]` "
+                "terbaik berdasarkan AIC. Evaluasi menggunakan **RMSE** dan **MAPE**.")
+            avail_tr = [v for v in villa_cfg if v in clean_occ]
+            if not avail_tr:
+                st.warning("Tidak ada vila dengan data. Upload data terlebih dahulu.")
+                return
+            section_header("Status Model per Vila", "📋")
+            status_rows = []
+            for v in avail_tr:
+                mi = db_load_model(v)
+                status_rows.append({
+                    "Vila":     v.replace("_villas", "").title(),
+                    "Data":     f"{len(clean_occ[v].resample('MS').mean().dropna())} bln",
+                    "d":        villa_d.get(v, "—"),
+                    "m":        villa_m.get(v, "—"),
+                    "Model":    "✅" if db_model_exists(v) else "❌ Belum ada",
+                    "Dilatih":  db_model_trained_at(v),
+                    "RMSE (%)": round(mi.get("rmse", 0), 2) if mi else "—",
+                    "MAPE (%)": round(mi.get("mape", 0), 2) if mi else "—",
+                })
+            st.dataframe(pd.DataFrame(status_rows), use_container_width=True, hide_index=True)
+            st.divider()
+            c_sel, c_opt = st.columns([3, 1])
+            with c_sel:
+                train_sel = st.multiselect(
+                    "Pilih Vila untuk Dilatih", avail_tr, default=avail_tr,
+                    format_func=lambda v: (
+                        f"{v.replace('_villas','').title()} "
+                        f"{'✅' if db_model_exists(v) else '⚠️ belum terlatih'}"
+                    ),
+                )
+            with c_opt:
+                force = st.checkbox("Force Retrain", value=False,
+                    help="Centang untuk melatih ulang vila yang sudah punya model")
+            if st.button("🚀 Mulai Training", type="primary", use_container_width=True):
+                to_train = [v for v in train_sel if force or not db_model_exists(v)]
+                skipped  = [v for v in train_sel if not force and db_model_exists(v)]
+                if skipped:
+                    st.info(f"⏭️ Dilewati (sudah ada model): "
+                            f"{', '.join(v.replace('_villas','').title() for v in skipped)}")
+                if not to_train:
+                    st.warning("Tidak ada vila yang perlu dilatih. Centang **Force Retrain** untuk retrain.")
+                else:
+                    pb       = st.progress(0)
+                    status_t = st.empty()
+                    results  = []
+                    for i, villa in enumerate(to_train):
+                        t_v = villa.replace("_villas", "").title()
+                        status_t.text(f"⚙️ Training {t_v} ({i+1}/{len(to_train)})...")
+                        pb.progress(i / len(to_train))
+                        try:
+                            info_tr = train_sarima(
+                                clean_occ[villa],
+                                villa_d.get(villa, 1),
+                                villa_m.get(villa, 12),
+                                villa_cfg.get(villa, {}).get("color", "#2563EB"),
+                                t_v,
+                            )
+                            db_save_model(villa, info_tr)
+                            log_model(
+                                st.session_state.user["username"], villa,
+                                f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
+                                info_tr["model"].aic,
+                                info_tr.get("rmse", 0),
+                                info_tr.get("mape", 0),
+                            )
+                            st.session_state.setdefault("sarima_cache", {})[villa] = info_tr
+                            results.append({
+                                "Vila":     t_v,
+                                "Order":    f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
+                                "AIC":      round(info_tr["model"].aic, 2),
+                                "RMSE (%)": round(info_tr.get("rmse", 0), 2),
+                                "MAPE (%)": round(info_tr.get("mape", 0), 2),
+                                "Status":   "✅ Berhasil",
+                            })
+                        except Exception as e:
+                            results.append({"Vila": t_v, "Status": f"❌ {str(e)[:80]}"})
+                    pb.progress(1.0)
+                    status_t.text("✅ Training selesai!")
+                    success_count = len([r for r in results if "✅" in r.get("Status", "")])
+                    st.success(f"Berhasil melatih **{success_count}** dari {len(to_train)} vila.")
+                    st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+                    st.info("🔄 Refresh halaman untuk melihat hasil forecast terbaru.")
+            with st.expander("📋 Log Training"):
+                logs_m = get_model_log()
+                if logs_m:
+                    st.dataframe(pd.DataFrame(logs_m), use_container_width=True, hide_index=True)
+
+# ══════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════
 
@@ -1265,7 +1978,6 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    # Init Supabase & seed data
     if "db_initialized" not in st.session_state:
         init_db()
         st.session_state["db_initialized"] = True
@@ -1344,11 +2056,9 @@ def main():
 
     if nav == "📂 Manajemen Data":
         if not is_admin:
-            st.error("🔒 Akses ditolak.")
+            st.error("🔒 Akses ditolak. Halaman ini hanya untuk Admin.")
             return
-        # Halaman manajemen data sama persis seperti sebelumnya
-        # (tidak diulang agar file tidak terlalu panjang)
-        st.info("Halaman Manajemen Data — sambungkan dari versi app.py original.")
+        page_manajemen_data(villa_cfg)
         return
 
     with st.spinner("Memuat data..."):
@@ -1362,6 +2072,7 @@ def main():
     clean_fin = {v: s for v, s in clean_fin_all.items() if v in selected_villas}
     if not clean_occ:
         st.error("❌ Tidak ada data untuk vila yang dipilih.")
+        st.info("Upload data melalui menu **Manajemen Data** (hanya Admin).")
         return
 
     with st.spinner("Analisis ADF & deteksi siklus..."):
@@ -1410,7 +2121,12 @@ def main():
         except Exception:
             pass
 
-    st.info("📊 Halaman Strategi — sambungkan page_strategi() dari app.py original.")
+    page_strategi(
+        clean_occ, clean_fin,
+        sarima_models, fore_info_all,
+        villa_cfg, villa_d, villa_m,
+        selected_villas,
+    )
 
 
 if __name__ == "__main__":
