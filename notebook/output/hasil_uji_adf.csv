@@ -1,0 +1,10 @@
+Vila,ADF Statistic,p-value,Lags Used,Critical Value 1%,Critical Value 5%,Kesimpulan,Perlu Differencing
+Briana Villas (original),-12.854,0.0,5,-3.4364,-2.8642,✅ STASIONER,Tidak
+Briana Villas (d=1),-13.0233,0.0,20,-3.4364,-2.8642,✅ STASIONER,Tidak
+Castello Villas (original),-3.3325,0.0135,20,-3.4364,-2.8642,✅ STASIONER,Tidak
+Elina Villas (original),-11.1475,0.0,2,-3.4363,-2.8642,✅ STASIONER,Tidak
+Isola Villas (original),-2.6615,0.0809,22,-3.4365,-2.8642,❌ TIDAK STASIONER,Ya
+Isola Villas (d=1),-12.4892,0.0,21,-3.4365,-2.8642,✅ STASIONER,Tidak
+Eindra Villas (original),-16.2048,0.0,0,-3.4363,-2.8642,✅ STASIONER,Tidak
+Esha Villas (original),-15.1602,0.0,1,-3.4363,-2.8642,✅ STASIONER,Tidak
+Ozamiz Villas (original),-14.4235,0.0,1,-3.4363,-2.8642,✅ STASIONER,Tidak

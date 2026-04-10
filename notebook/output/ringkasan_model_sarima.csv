@@ -1,0 +1,8 @@
+Vila,"Model (p,d,q)","Seasonal (P,D,Q,S)",Order String,AIC,MAPE (%),RMSE,MAE,WF Iterations,Rating,Fit Time,Source
+Briana Villas,FAILED,FAILED,Error: module 'pmdarima' has no attribute 'SARIMAX',,,,,0,❌ Error,37.37s,error
+Castello Villas,FAILED,FAILED,Error: module 'pmdarima' has no attribute 'SARIMAX',,,,,0,❌ Error,41.31s,error
+Elina Villas,FAILED,FAILED,Error: module 'pmdarima' has no attribute 'SARIMAX',,,,,0,❌ Error,26.36s,error
+Isola Villas,FAILED,FAILED,Error: module 'pmdarima' has no attribute 'SARIMAX',,,,,0,❌ Error,68.96s,error
+Eindra Villas,FAILED,FAILED,Error: module 'pmdarima' has no attribute 'SARIMAX',,,,,0,❌ Error,6.97s,error
+Esha Villas,FAILED,FAILED,Error: module 'pmdarima' has no attribute 'SARIMAX',,,,,0,❌ Error,19.96s,error
+Ozamiz Villas,FAILED,FAILED,Error: module 'pmdarima' has no attribute 'SARIMAX',,,,,0,❌ Error,17.65s,error

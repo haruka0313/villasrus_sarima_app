@@ -1,0 +1,30 @@
+{
+  "briana_villas": {
+    "area": "canggu",
+    "color": "#3D6BE8"
+  },
+  "castello_villas": {
+    "area": "canggu",
+    "color": "#7c3aed"
+  },
+  "elina_villas": {
+    "area": "canggu",
+    "color": "#059669"
+  },
+  "isola_villas": {
+    "area": "canggu",
+    "color": "#db2777"
+  },
+  "eindra_villas": {
+    "area": "seminyak",
+    "color": "#d97706"
+  },
+  "esha_villas": {
+    "area": "seminyak",
+    "color": "#b45309"
+  },
+  "ozamiz_villas": {
+    "area": "seminyak",
+    "color": "#9333ea"
+  }
+}

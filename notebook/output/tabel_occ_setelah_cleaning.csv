@@ -1,0 +1,9 @@
+No,Nama Atribut,Tipe Data,Contoh Nilai,Keterangan
+1,date,datetime64,2023-01-02 00:00:00,Tanggal observasi harian (datetime)
+2,vila,String,Briana Villas,Nama unit vila
+3,lokasi,String,Canggu,Lokasi vila (Canggu / Seminyak)
+4,occupancy,Float,100,Tingkat hunian 0–100% (telah di-clip dari anomali)
+5,arrivals,Integer,0,Jumlah reservasi check-in
+6,departures,Integer,0,Jumlah reservasi check-out
+7,booked,Integer,1,Jumlah unit terbooking
+8,available,Integer,0,Ketersediaan unit vila

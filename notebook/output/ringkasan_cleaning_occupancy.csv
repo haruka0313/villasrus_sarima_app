@@ -1,0 +1,7 @@
+Aspek,Sebelum Cleaning,Setelah Cleaning,Aksi
+Jumlah Kolom,12 kolom,8 kolom,4 kolom dihapus
+Tipe Date,"String (""Sun 1 Jan 2023"")",datetime64,Konversi datetime
+Tipe Occupancy,"String (""200%"")",Float (0.0–100.0),"Hapus %, konversi numerik"
+Range Occupancy,0% – 10.100%,0% – 100%,Clipping > 100 → 100
+Missing Values,0,0,-
+Anomali,Ada (occ > 100%),Di-clip ke 100%,"clip(0, 100)"
