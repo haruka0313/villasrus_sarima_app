@@ -549,51 +549,61 @@ def detect_m(monthly: pd.Series) -> tuple[int, str]:
 def compute_rmse(actual, predicted) -> float:
     return float(np.sqrt(mean_squared_error(actual, predicted)))
 
+def compute_smape(actual: np.ndarray, predicted: np.ndarray) -> float:
+    """
+    Symmetric Mean Absolute Percentage Error — identik dengan notebook Cell 11.
+    Menghindari division by zero jika keduanya nol.
+    """
+    actual    = np.array(actual, dtype=float)
+    predicted = np.array(predicted, dtype=float)
+    denom     = (np.abs(actual) + np.abs(predicted)) / 2.0
+    denom     = np.where(denom == 0, 1.0, denom)   # hindari inf
+    return float(np.mean(np.abs(actual - predicted) / denom) * 100)
+
+# Alias agar bagian UI lama yang masih pakai compute_mape tidak error
 def compute_mape(actual: np.ndarray, predicted: np.ndarray) -> float:
-    mask = np.abs(actual) > 5
-    if mask.sum() < 2:
-        return np.nan
-    return float(np.mean(np.abs((actual[mask] - predicted[mask]) / actual[mask])) * 100)
+    return compute_smape(actual, predicted)
 
 def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
-    # Sama persis dengan notebook Cell 6:
-    # d=0 jika stasioner di level, d=1 jika diff(1), d=2 jika masih belum stasioner
+    """
+    Identik dengan notebook Cell 8:
+    - d=0 jika stasioner di level
+    - d=1 jika tidak stasioner (CAP di sini, tidak lanjut d=2)
+    - d di-min dengan 1 (lindungi dari overfit pada data pendek)
+    """
     villa_d, rows = {}, []
     for villa, series in clean_occ.items():
         monthly = series.resample("MS").mean().dropna()
-        res0 = adf_test(monthly)
-        p1_val, p2_val = None, None
+        res0    = adf_test(monthly)
+        p1_val  = "-"
 
         if res0["stationary"]:
             d    = 0
-            note = "✅ Stasioner pada level (d=0)"
+            note = "✅ Stasioner (d=0)"
         else:
-            diff1 = monthly.diff().dropna()
-            res1  = adf_test(diff1)
+            diff1  = monthly.diff().dropna()
+            res1   = adf_test(diff1)
             p1_val = res1["pvalue"]
+            d      = 1
             if res1["stationary"]:
-                d    = 1
-                note = "🔄 Stasioner setelah diff(1) -> d=1"
+                note = f"🔄 Diff(1) stasioner (p_level={res0['pvalue']} -> p_diff1={p1_val})"
             else:
-                diff2 = monthly.diff().diff().dropna()
-                res2  = adf_test(diff2)
-                p2_val = res2["pvalue"]
-                d    = 2
-                note = "🔄 Stasioner setelah diff(2) -> d=2" if res2["stationary"] \
-                       else f"⚠️ Masih belum stasioner (p={res2['pvalue']:.3f}), d=2 digunakan"
+                note = (f"⚠️ Diff(1) belum stasioner sempurna (p={p1_val}), "
+                        f"tapi d=1 tetap dipakai (cap d_max=1)")
 
+        # CAP d=1 — sama persis dengan notebook
+        d = min(d, 1)
         villa_d[villa] = d
+
         rows.append({
-            "Vila":            villa.replace("_villas", "").title(),
-            "Area":            villa_cfg.get(villa, {}).get("area", "").title(),
-            "N (bln)":         len(monthly),
-            "ADF Stat":        res0["statistic"],
-            "p-value (Level)": res0["pvalue"],
-            "Stasioner?":      "✅ Ya" if res0["stationary"] else "❌ Tidak",
-            "p-value (d1)":    p1_val if p1_val is not None else "-",
-            "p-value (d2)":    p2_val if p2_val is not None else "-",
-            "d digunakan":     d,
-            "Keterangan":      note,
+            "Vila":         villa.replace("_villas", "").title(),
+            "Area":         villa_cfg.get(villa, {}).get("area", "").title(),
+            "N (bln)":      len(monthly),
+            "ADF (level)":  res0["statistic"],
+            "p (level)":    res0["pvalue"],
+            "p (diff1)":    p1_val,
+            "d dipakai":    d,
+            "Keterangan":   note,
         })
     return villa_d, pd.DataFrame(rows)
 
@@ -618,97 +628,95 @@ def run_detect_m_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFra
 # SARIMA — TRAINING & FORECAST
 # ══════════════════════════════════════════════════════════════
 def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> dict:
+    """
+    Identik dengan notebook Cell 9 & 11:
+    - auto_arima: D=1 dikunci, return_valid_fits=True, pilih AIC terkecil
+    - Split: 80% train / 20% test
+    - Evaluasi: RMSE & SMAPE dihitung pada TEST SET
+    - model_full: refit seluruh data untuk forecast
+    """
     monthly      = series.resample("MS").mean().dropna()
     use_seasonal = len(monthly) >= MIN_SEASONAL_TRAIN
 
-    # ══════════════════════════════════════════════════════
-    # STEP 1 — Pilih model terbaik via AIC dari FULL data
-    # (sesuai metodologi skripsi: AIC dihitung dari semua data)
-    # CATATAN: D tidak dikunci (None) agar konsisten dengan notebook
-    # ══════════════════════════════════════════════════════
+    # ── auto_arima pada FULL data → pilih order (identik Cell 9 notebook)
     try:
         all_fits = auto_arima(
-            monthly,                    # ← full data untuk seleksi AIC
-            seasonal          = use_seasonal,
-            m                 = m if use_seasonal else 1,
-            d                 = d,
-            D                 = None,   # ← sama dengan notebook: D dipilih otomatis
-            start_p=0,        max_p = 3,
-            start_q=0,        max_q = 3,
-            start_P=0,        max_P = 2,
-            start_Q=0,        max_Q = 2,
-            information_criterion = "aic",
-            stepwise          = True,
-            return_valid_fits = True,   # ← sama dengan notebook
-            error_action      = "ignore",
-            suppress_warnings = True,
-            trace             = False,
+            monthly,
+            d                    = d,
+            D                    = 1,           # dikunci seperti notebook
+            m                    = m if use_seasonal else 1,
+            max_p                = 3,
+            max_q                = 3,
+            max_P                = 2,
+            max_Q                = 2,
+            seasonal             = use_seasonal,
+            stepwise             = True,
+            information_criterion= "aic",
+            error_action         = "ignore",
+            suppress_warnings    = True,
+            trace                = False,
+            return_valid_fits    = True,
         )
-        # Pilih model dengan AIC terkecil (sama persis dengan notebook)
         if isinstance(all_fits, list) and len(all_fits) > 0:
-            best_model     = sorted(all_fits, key=lambda mdl: mdl.aic())[0]
+            best_model = sorted(all_fits, key=lambda mdl: mdl.aic())[0]
         else:
-            best_model     = all_fits
+            best_model = all_fits
         order          = best_model.order
         seasonal_order = best_model.seasonal_order
     except Exception:
-        # Fallback sederhana jika auto_arima gagal
         order          = (1, d, 0)
         seasonal_order = (0, 1, 0, m if use_seasonal else 0)
 
-    # Guard: hindari model (0,0,0)(0,0,0) yang tidak informatif
     if order == (0, 0, 0) and seasonal_order[:3] == (0, 0, 0):
         order = (1, d, 0)
 
-    # Fit SARIMAX ke full data untuk dapatkan AIC final
+    # ── Split 80/20 → evaluasi pada test set (identik Cell 11 notebook)
+    n_test    = max(int(len(monthly) * 0.20), 3)
+    split_idx = len(monthly) - n_test
+    train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
+
+    try:
+        model_train = SARIMAX(
+            train,
+            order                = order,
+            seasonal_order       = seasonal_order,
+            enforce_stationarity = False,
+            enforce_invertibility= False,
+        ).fit(disp=False)
+    except Exception:
+        order, seasonal_order = (1, d, 1), (0, 1, 0, m if use_seasonal else 0)
+        model_train = SARIMAX(
+            train,
+            order                = order,
+            seasonal_order       = seasonal_order,
+            enforce_stationarity = False,
+            enforce_invertibility= False,
+        ).fit(disp=False)
+
+    pred_obj  = model_train.get_forecast(steps=len(test))
+    pred_mean = pred_obj.predicted_mean.clip(0, 100)
+    pred_ci   = pred_obj.conf_int(alpha=0.10)
+
+    rmse_val  = compute_rmse(test.values, pred_mean.values)
+    smape_val = compute_smape(test.values, pred_mean.values)
+
+    # ── Refit pada SELURUH data → untuk AIC final & forecast masa depan
     try:
         model_full = SARIMAX(
             monthly,
-            order          = order,
-            seasonal_order = seasonal_order,
-            enforce_stationarity  = False,
-            enforce_invertibility = False,
+            order                = order,
+            seasonal_order       = seasonal_order,
+            enforce_stationarity = False,
+            enforce_invertibility= False,
         ).fit(disp=False)
-        aic_full = model_full.aic
     except Exception:
-        # Fallback ke model lebih sederhana
-        order, seasonal_order = (1, d, 1), (0, 1, 0, m if use_seasonal else 0)
-        model_full = SARIMAX(
-            monthly,
-            order          = order,
-            seasonal_order = seasonal_order,
-            enforce_stationarity  = False,
-            enforce_invertibility = False,
-        ).fit(disp=False)
-        aic_full = model_full.aic
+        model_full = model_train
 
-    # ══════════════════════════════════════════════════════
-    # STEP 2 — RMSE & MAPE dari fitted values (full data)
-    # Konsisten dengan notebook: tidak ada split train/test.
-    # RMSE & MAPE dihitung dari in-sample fitted values.
-    # ══════════════════════════════════════════════════════
-    fitted_vals = model_full.fittedvalues.clip(0, 100)
-    # Sejajarkan index (fitted values bisa lebih pendek karena differencing)
-    common_idx  = monthly.index.intersection(fitted_vals.index)
-    actual_vals = monthly.loc[common_idx]
-    fitted_vals = fitted_vals.loc[common_idx]
+    train_fitted = model_train.fittedvalues.clip(0, 100)
 
-    rmse_val = compute_rmse(actual_vals.values, fitted_vals.values)
-    mape_val = compute_mape(actual_vals.values, fitted_vals.values)
-
-    # Untuk chart model fit: tampilkan fitted vs actual (full data, tanpa split)
-    pred_ci = model_full.get_prediction().conf_int(alpha=0.10)
-    pred_ci = pred_ci.loc[common_idx].clip(0, 100)
-
-    # train = full monthly, test = kosong (tidak ada split)
-    train = monthly
-    test  = pd.Series(dtype=float)
-
-    # ══════════════════════════════════════════════════════
-    # Return — semua dari full data, konsisten dengan notebook
-    # ══════════════════════════════════════════════════════
     return {
         "model"         : model_full,
+        "model_train"   : model_train,
         "order"         : order,
         "seasonal_order": seasonal_order,
         "train"         : train,
@@ -717,13 +725,16 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
         "d"             : d,
         "m"             : m,
         "use_seasonal"  : use_seasonal,
-        "pred_mean"     : fitted_vals,  # fitted values dari full data
+        "pred_mean"     : pred_mean,
         "pred_ci"       : pred_ci,
+        "train_fitted"  : train_fitted,
         "rmse"          : rmse_val,
-        "mape"          : mape_val,
+        "mape"          : smape_val,
+        "smape"         : smape_val,
         "color"         : color,
         "title"         : title,
     }
+
 
 def make_forecast(info: dict) -> dict:
     monthly = info["monthly"]
@@ -893,28 +904,41 @@ def chart_acf_pacf(monthly: pd.Series, m: int, color: str, title: str) -> go.Fig
     return fig
 
 def chart_model_fit(info: dict) -> go.Figure:
-    # Tanpa split: tampilkan aktual vs fitted values (full data)
-    monthly   = info["monthly"]
-    pred_mean = info["pred_mean"]   # fitted values dari full data
-    pred_ci   = info["pred_ci"]
-    color, title = info["color"], info["title"]
-    rmse, mape   = info["rmse"], info.get("mape", float("nan"))
+    """Chart model fit identik dengan notebook Cell 10:
+    train (abu) + test aktual (hitam) + prediksi test (warna villa) + CI"""
+    train, test   = info["train"], info["test"]
+    pred_mean     = info["pred_mean"]   # prediksi pada test set
+    pred_ci       = info["pred_ci"]
+    color, title  = info["color"], info["title"]
+    rmse          = info["rmse"]
+    smape         = info.get("smape", info.get("mape", float("nan")))
+
     fig = go.Figure()
+    # CI band
     fig.add_trace(go.Scatter(
         x=list(pred_ci.index) + list(pred_ci.index[::-1]),
         y=list(pred_ci.iloc[:, 1].clip(0, 100)) + list(pred_ci.iloc[:, 0].clip(0, 100)),
         fill="toself", fillcolor=hex_rgba(color, 0.12),
         line=dict(color="rgba(0,0,0,0)"), name="CI 90%", hoverinfo="skip"))
-    fig.add_trace(go.Scatter(x=monthly.index, y=monthly.values,
-        line=dict(color="#111827", width=2), mode="lines+markers",
-        marker=dict(size=5), name="Aktual",
-        hovertemplate="<b>%{x|%b %Y}</b><br>Aktual: %{y:.1f}%<extra></extra>"))
-    mape_label = f"{mape:.1f}%" if not np.isnan(mape) else "—"
+    # Train (history)
+    fig.add_trace(go.Scatter(x=train.index, y=train.values,
+        line=dict(color="#9CA3AF", width=1.5), name="Data Latih",
+        hovertemplate="<b>%{x|%b %Y}</b><br>Latih: %{y:.1f}%<extra></extra>"))
+    # Test actual
+    if len(test) > 0:
+        fig.add_trace(go.Scatter(x=test.index, y=test.values,
+            line=dict(color="#111827", width=2.2), mode="lines+markers",
+            marker=dict(size=7), name="Aktual (Test)",
+            hovertemplate="<b>%{x|%b %Y}</b><br>Aktual: %{y:.1f}%<extra></extra>"))
+        fig.add_vline(x=test.index[0].isoformat(), line_color="#9CA3AF",
+            line_width=1.2, line_dash="dot")
+    # Prediksi test
+    smape_label = f"{smape:.1f}%" if not np.isnan(smape) else "—"
     fig.add_trace(go.Scatter(x=pred_mean.index, y=pred_mean.values,
         line=dict(color=color, width=2.2, dash="dash"),
         mode="lines+markers", marker=dict(size=6, symbol="square"),
-        name=f"Fitted | RMSE={rmse:.1f}% | MAPE={mape_label}",
-        hovertemplate="<b>%{x|%b %Y}</b><br>Fitted: %{y:.1f}%<extra></extra>"))
+        name=f"Prediksi | RMSE={rmse:.1f}% | SMAPE={smape_label}",
+        hovertemplate="<b>%{x|%b %Y}</b><br>Prediksi: %{y:.1f}%<extra></extra>"))
     order_str = f"SARIMA{info['order']}×{info['seasonal_order']}"
     apply_base(fig,
         title=dict(text=f"{title} — {order_str} | d={info['d']} m={info['m']} | AIC={info['model'].aic:.1f}",
@@ -925,26 +949,37 @@ def chart_model_fit(info: dict) -> go.Figure:
             bgcolor="rgba(255,255,255,0.9)", bordercolor="#E5E7EB", borderwidth=1))
     return fig
 
+
 def chart_forecast(info: dict, fore: dict) -> go.Figure:
-    monthly = info["monthly"]
+    """Identik dengan notebook Cell 10: history + test aktual + fitted test + forecast"""
+    monthly    = info["monthly"]
+    train, test = info["train"], info["test"]
     color, title = info["color"], info["title"]
     fore_mean, fore_ci = fore["fore_mean"], fore["fore_ci"]
-    is_flat = fore["is_flat"]
+    is_flat    = fore["is_flat"]
     fore_color = "#EF4444" if is_flat else color
     fig = go.Figure()
+    # CI forecast
     fig.add_trace(go.Scatter(
         x=list(fore_ci.index) + list(fore_ci.index[::-1]),
         y=list(fore_ci.iloc[:, 1]) + list(fore_ci.iloc[:, 0]),
         fill="toself", fillcolor=hex_rgba(fore_color, 0.10),
         line=dict(color="rgba(0,0,0,0)"), name="CI 90%", hoverinfo="skip"))
+    # History (train)
     fig.add_trace(go.Scatter(x=monthly.index, y=monthly.values,
         line=dict(color="#9CA3AF", width=1.5), name="Historis",
         hovertemplate="<b>%{x|%b %Y}</b><br>Historis: %{y:.1f}%<extra></extra>"))
-    # Fitted values (full data, tanpa split)
-    fitted = info["pred_mean"]
-    fig.add_trace(go.Scatter(x=fitted.index, y=fitted.values,
-        line=dict(color=color, width=1.5, dash="dot"), name="Fitted", opacity=0.7,
+    # Test aktual
+    if len(test) > 0:
+        fig.add_trace(go.Scatter(x=test.index, y=test.values,
+            line=dict(color="#111827", width=2), mode="lines+markers",
+            marker=dict(size=5), name="Aktual (Test)",
+            hovertemplate="<b>%{x|%b %Y}</b><br>Aktual: %{y:.1f}%<extra></extra>"))
+    # Fitted pada test (prediksi model_train ke test)
+    fig.add_trace(go.Scatter(x=info["pred_mean"].index, y=info["pred_mean"].values,
+        line=dict(color=color, width=1.5, dash="dot"), name="Fitted (Test)", opacity=0.7,
         hovertemplate="<b>%{x|%b %Y}</b><br>Fitted: %{y:.1f}%<extra></extra>"))
+    # Forecast
     flat_label = " ⚠️ Flat" if is_flat else f" (σ={fore_mean.std():.1f}%)"
     fig.add_trace(go.Scatter(
         x=fore_mean.index, y=fore_mean.values,
