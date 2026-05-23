@@ -601,61 +601,109 @@ def run_detect_m_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFra
 # ══════════════════════════════════════════════════════════════
 # SARIMA — TRAINING & FORECAST
 # ══════════════════════════════════════════════════════════════
-
 def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> dict:
     monthly      = series.resample("MS").mean().dropna()
     use_seasonal = len(monthly) >= MIN_SEASONAL_TRAIN
 
-    # ── UBAH INI (samakan dengan teks skripsi)
-    max_pq = 3      # was: 2 if d >= 1 else 3
-    max_PQ = 2      # was: 1
-
-    split_idx    = max(int(len(monthly) * 0.85), len(monthly) - 6)
-    train, test  = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
-
+    # ══════════════════════════════════════════════════════
+    # STEP 1 — Pilih model terbaik via AIC dari FULL data
+    # (sesuai metodologi skripsi: AIC dihitung dari semua data)
+    # ══════════════════════════════════════════════════════
     try:
         auto = auto_arima(
-            train,
-            seasonal=use_seasonal, m=m if use_seasonal else 1,
-            d=d,
-            D=1,                    # tetap dikunci D=1
-            start_p=0, max_p=max_pq,
-            start_q=0, max_q=max_pq,
-            start_P=0, max_P=max_PQ,
-            start_Q=0, max_Q=max_PQ,
-            information_criterion="aic", stepwise=True,
-            error_action="ignore", suppress_warnings=True, trace=False,
+            monthly,                    # ← full data untuk seleksi AIC
+            seasonal     = use_seasonal,
+            m            = m if use_seasonal else 1,
+            d            = d,
+            D            = 1,           # seasonal differencing dikunci
+            start_p=0,   max_p = 3,
+            start_q=0,   max_q = 3,
+            start_P=0,   max_P = 2,
+            start_Q=0,   max_Q = 2,
+            information_criterion = "aic",
+            stepwise          = True,
+            error_action      = "ignore",
+            suppress_warnings = True,
+            trace             = False,
         )
-        order, seasonal_order = auto.order, auto.seasonal_order
+        order         = auto.order
+        seasonal_order = auto.seasonal_order
     except Exception:
-        order, seasonal_order = (1, d, 1), (0, 0, 0, 0)
+        # Fallback sederhana jika auto_arima gagal
+        order          = (1, d, 0)
+        seasonal_order = (0, 1, 0, m if use_seasonal else 0)
+
+    # Guard: hindari model (0,0,0)(0,0,0) yang tidak informatif
     if order == (0, 0, 0) and seasonal_order[:3] == (0, 0, 0):
         order = (1, d, 0)
+
+    # Fit SARIMAX ke full data untuk dapatkan AIC final
     try:
-        model = SARIMAX(
-            train, order=order, seasonal_order=seasonal_order,
-            enforce_stationarity=False, enforce_invertibility=False
+        model_full = SARIMAX(
+            monthly,
+            order          = order,
+            seasonal_order = seasonal_order,
+            enforce_stationarity  = False,
+            enforce_invertibility = False,
+        ).fit(disp=False)
+        aic_full = model_full.aic
+    except Exception:
+        # Fallback ke model lebih sederhana
+        order, seasonal_order = (1, d, 1), (0, 1, 0, m if use_seasonal else 0)
+        model_full = SARIMAX(
+            monthly,
+            order          = order,
+            seasonal_order = seasonal_order,
+            enforce_stationarity  = False,
+            enforce_invertibility = False,
+        ).fit(disp=False)
+        aic_full = model_full.aic
+
+    # ══════════════════════════════════════════════════════
+    # STEP 2 — Split 85/15 untuk evaluasi RMSE & MAPE
+    # (model order sudah fix dari Step 1, hanya evaluasi akurasi)
+    # ══════════════════════════════════════════════════════
+    split_idx   = max(int(len(monthly) * 0.85), len(monthly) - 6)
+    train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
+
+    try:
+        model_train = SARIMAX(
+            train,                      # ← train saja untuk prediksi ke test
+            order          = order,
+            seasonal_order = seasonal_order,
+            enforce_stationarity  = False,
+            enforce_invertibility = False,
         ).fit(disp=False)
     except Exception:
-        order, seasonal_order = (1, d, 1), (0, 0, 0, 0)
-        model = SARIMAX(
-            train, order=order, seasonal_order=seasonal_order,
-            enforce_stationarity=False, enforce_invertibility=False
-        ).fit(disp=False)
-    pred_obj   = model.get_forecast(steps=len(test))
-    pred_mean  = pred_obj.predicted_mean.clip(0, 100)
-    pred_ci    = pred_obj.conf_int(alpha=0.10)
+        model_train = model_full        # fallback: pakai model full jika train gagal
+
+    pred_obj  = model_train.get_forecast(steps=len(test))
+    pred_mean = pred_obj.predicted_mean.clip(0, 100)
+    pred_ci   = pred_obj.conf_int(alpha=0.10)
+
     rmse_val = compute_rmse(test.values, pred_mean.values)
     mape_val = compute_mape(test.values, pred_mean.values)
+
+    # ══════════════════════════════════════════════════════
+    # Return — model_full dipakai untuk AIC & forecast
+    #          model_train dipakai untuk RMSE/MAPE display
+    # ══════════════════════════════════════════════════════
     return {
-        "model": model,
-        "order": order,
+        "model"         : model_full,   # ← model dari full data (untuk AIC & forecast)
+        "order"         : order,
         "seasonal_order": seasonal_order,
-        "train": train, "test": test, "monthly": monthly,
-        "d": d, "m": m, "use_seasonal": use_seasonal,
-        "pred_mean": pred_mean, "pred_ci": pred_ci,
-        "rmse": rmse_val, "mape": mape_val,
-        "color": color, "title": title,
+        "train"         : train,
+        "test"          : test,
+        "monthly"       : monthly,
+        "d"             : d,
+        "m"             : m,
+        "use_seasonal"  : use_seasonal,
+        "pred_mean"     : pred_mean,    # prediksi ke test set (untuk chart model fit)
+        "pred_ci"       : pred_ci,
+        "rmse"          : rmse_val,
+        "mape"          : mape_val,
+        "color"         : color,
+        "title"         : title,
     }
 
 def make_forecast(info: dict) -> dict:
@@ -1289,37 +1337,56 @@ def page_manajemen_data(villa_cfg: dict):
             st.info("Belum ada data tersimpan di database.")
 
     # ── Preview & Hapus ──
+   # ── Preview & Hapus ──
     with tab_preview:
-        section_header("Preview Data", "🔍")
+        section_header("Preview Data", "🔍")  # ← BENAR, indent 8 spasi
         c1, c2 = st.columns(2)
         with c1:
-            prev_villa = st.selectbox("Vila", list(villa_cfg.keys()),
-                format_func=lambda v: v.replace("_villas", "").title(), key="prev_villa")
+            prev_villa = st.selectbox(
+                "Vila", list(villa_cfg.keys()),
+                format_func=lambda v: v.replace("_villas", "").title(),
+                key="prev_villa"
+            )
         with c2:
-            prev_type = st.selectbox("Tipe Data", ["occupancy", "financial"],
+            prev_type = st.selectbox(
+                "Tipe Data", ["occupancy", "financial"],
                 format_func=lambda x: "Operasional" if x == "occupancy" else "Finansial",
-                key="prev_type")
-        df_prev = db_load_data(prev_villa, prev_type)
-        if df_prev is not None:
-            info_p = db_data_info(prev_villa, prev_type)
-            st.caption(f"**{info_p['rows']:,} baris** | File: {info_p['filename']} | Upload: {info_p['uploaded']}")
-            st.dataframe(df_prev.head(100), use_container_width=True)
-            col_dl, col_del = st.columns([3, 1])
-            with col_dl:
-                st.download_button(
-                    "⬇️ Download CSV",
-                    df_prev.to_csv(index=False).encode("utf-8"),
-                    f"{prev_villa}_{prev_type}.csv", "text/csv",
-                    use_container_width=True)
-            with col_del:
-                if st.button("🗑️ Hapus Data", type="secondary", use_container_width=True,
-                             key=f"del_{prev_villa}_{prev_type}"):
-                    db_delete_data(prev_villa, prev_type)
-                    load_all_data.clear()
-                    st.success("✅ Data dihapus.")
-                    st.rerun()
+                key="prev_type"
+            )
+        if not villa_cfg:
+            st.info("Belum ada vila terdaftar.")
         else:
-            st.info(f"Belum ada data **{prev_type}** untuk **{prev_villa.replace('_villas','').title()}**.")
+            df_prev = db_load_data(prev_villa, prev_type)
+            if df_prev is not None:
+                info_p = db_data_info(prev_villa, prev_type)
+                st.caption(
+                    f"**{info_p['rows']:,} baris** | "
+                    f"File: {info_p['filename']} | "
+                    f"Upload: {info_p['uploaded']}"
+                )
+                st.dataframe(df_prev.head(100), use_container_width=True)
+                col_dl, col_del = st.columns([3, 1])
+                with col_dl:
+                    st.download_button(
+                        "⬇️ Download CSV",
+                        df_prev.to_csv(index=False).encode("utf-8"),
+                        f"{prev_villa}_{prev_type}.csv", "text/csv",
+                        use_container_width=True
+                    )
+                with col_del:
+                    if st.button(
+                        "🗑️ Hapus Data", type="secondary",
+                        use_container_width=True,
+                        key=f"del_{prev_villa}_{prev_type}"
+                    ):
+                        db_delete_data(prev_villa, prev_type)
+                        load_all_data.clear()
+                        st.success("✅ Data dihapus.")
+                        st.rerun()
+            else:
+                nama = prev_villa.replace("_villas", "").title()
+                tipe = "Operasional" if prev_type == "occupancy" else "Finansial"
+                st.info(f"Belum ada data **{tipe}** untuk **{nama}**.")
         section_header("Log Upload", "📋")
         logs = get_upload_log()
         if logs:
@@ -2277,7 +2344,7 @@ def main():
         if villa in cache and villa in clean_occ:
             sarima_models[villa] = cache[villa]
 
-    for villa in [v for v in selected_villas if v not in sarima_models and v in clean_occ]:
+   for villa in [v for v in selected_villas if v not in sarima_models and v in clean_occ]:
         mi = db_load_model(villa)
         if not mi:
             continue
@@ -2285,19 +2352,33 @@ def main():
             monthly = clean_occ[villa].resample("MS").mean().dropna()
             order   = mi.get("order",   (1, 1, 1))
             s_order = mi.get("seasonal_order", (0, 0, 0, 0))
+
+            # ── Fit model_full ke FULL data (konsisten dengan train_sarima Step 1)
+            model_full = SARIMAX(
+                monthly, order=order, seasonal_order=s_order,
+                enforce_stationarity=False, enforce_invertibility=False
+            ).fit(disp=False)
+
+            # ── Split 85/15 untuk RMSE/MAPE (konsisten dengan train_sarima Step 2)
             split_  = max(int(len(monthly) * 0.85), len(monthly) - 6)
             train_, test_ = monthly.iloc[:split_], monthly.iloc[split_:]
-            fitted_ = SARIMAX(
+            model_train = SARIMAX(
                 train_, order=order, seasonal_order=s_order,
                 enforce_stationarity=False, enforce_invertibility=False
             ).fit(disp=False)
-            pred_  = fitted_.get_forecast(steps=len(test_))
+
+            pred_  = model_train.get_forecast(steps=len(test_))
             pm_    = pred_.predicted_mean.clip(0, 100)
             pc_    = pred_.conf_int(alpha=0.10)
+
             sarima_models[villa] = {
-                **mi, "model": fitted_,
-                "train": train_, "test": test_, "monthly": monthly,
-                "pred_mean": pm_, "pred_ci": pc_,
+                **mi,
+                "model"    : model_full,   # ← full data untuk AIC
+                "train"    : train_,
+                "test"     : test_,
+                "monthly"  : monthly,
+                "pred_mean": pm_,
+                "pred_ci"  : pc_,
                 "rmse": compute_rmse(test_.values, pm_.values),
                 "mape": compute_mape(test_.values, pm_.values),
                 "color": villa_cfg.get(villa, {}).get("color", "#2563EB"),
