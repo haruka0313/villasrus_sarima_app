@@ -2261,66 +2261,7 @@ def main():
     is_admin  = st.session_state.user.get("role") == "admin"
     username  = st.session_state.user.get("username", "")
 
-    with st.sidebar:
-        st.markdown(
-            f"<div style='text-align:center;padding:12px 0 8px;'>"
-            f"<img src='{LOGO_URL}' style='height:60px;object-fit:contain;'></div>",
-            unsafe_allow_html=True)
-        role_color = "#DC2626" if is_admin else "#2563EB"
-        role_label = "Admin" if is_admin else "User"
-        st.markdown(
-            f"<div style='text-align:center;padding:4px 0 12px;'>"
-            f"<span style='font-size:13px;color:#374151;'>{username}</span>&nbsp;"
-            f"<span style='background:{role_color};color:white;font-size:11px;"
-            f"font-weight:600;padding:2px 8px;border-radius:12px;'>{role_label}</span>"
-            f"</div>", unsafe_allow_html=True)
-        st.divider()
-        if is_admin:
-            nav = st.radio("", [
-                "🏠 Dashboard Utama",
-                "📊 Strategi Hunian & Harga",
-                "📂 Manajemen Data",
-            ], label_visibility="collapsed")
-        else:
-            nav = st.radio("", [
-                "🏠 Dashboard Utama",
-                "📊 Strategi Hunian & Harga",
-            ], label_visibility="collapsed")
-        if nav in ["🏠 Dashboard Utama", "📊 Strategi Hunian & Harga"]:
-            st.divider()
-            st.markdown(
-                "<div style='font-size:12px;font-weight:600;color:#374151;"
-                "text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;'>Filter Vila</div>",
-                unsafe_allow_html=True)
-            selected_villas = st.multiselect(
-                "", options=list(villa_cfg.keys()),
-                default=list(villa_cfg.keys()),
-                format_func=lambda v: f"{v.replace('_villas','').title()} · {villa_cfg[v]['area'].title()}",
-                label_visibility="collapsed")
-            if not selected_villas:
-                st.warning("Pilih minimal 1 vila.")
-                selected_villas = list(villa_cfg.keys())
-        else:
-            selected_villas = list(villa_cfg.keys())
-        st.divider()
-        if st.button("🚪 Logout", use_container_width=True):
-            session_logout()
-            st.session_state.logged_in = False
-            st.session_state.user      = {}
-            st.rerun()
-        st.markdown(
-            "<div style='font-size:10px;color:#9CA3AF;text-align:center;padding-top:8px;'>"
-            "SARIMA Forecasting System<br>PT Bali Cipta Vila Mandiri<br>© 2025</div>",
-            unsafe_allow_html=True)
-
-    if nav == "📂 Manajemen Data":
-        if not is_admin:
-            st.error("🔒 Akses ditolak. Halaman ini hanya untuk Admin.")
-            return
-        page_manajemen_data(villa_cfg)
-        return
-
-    with st.spinner("Memuat data..."):
+      with st.spinner("Memuat data..."):
         clean_occ_all, clean_fin_all = load_all_data(json.dumps(villa_cfg, sort_keys=True))
 
     if nav == "🏠 Dashboard Utama":
@@ -2329,6 +2270,7 @@ def main():
 
     clean_occ = {v: s for v, s in clean_occ_all.items() if v in selected_villas}
     clean_fin = {v: s for v, s in clean_fin_all.items() if v in selected_villas}
+
     if not clean_occ:
         st.error("❌ Tidak ada data untuk vila yang dipilih.")
         st.info("Upload data melalui menu **Manajemen Data** (hanya Admin).")
@@ -2338,33 +2280,44 @@ def main():
         villa_d, _ = run_adf_all(clean_occ, villa_cfg)
         villa_m, _ = run_detect_m_all(clean_occ, villa_cfg)
 
+    # ==================== SARIMA Models ====================
     sarima_models: dict = {}
     cache = st.session_state.get("sarima_cache", {})
+
+    # Load from cache
     for villa in selected_villas:
         if villa in cache and villa in clean_occ:
             sarima_models[villa] = cache[villa]
 
-   for villa in [v for v in selected_villas if v not in sarima_models and v in clean_occ]:
+    # Load from database untuk yang belum ada di cache
+    for villa in [v for v in selected_villas if v not in sarima_models and v in clean_occ]:
         mi = db_load_model(villa)
         if not mi:
             continue
         try:
             monthly = clean_occ[villa].resample("MS").mean().dropna()
-            order   = mi.get("order",   (1, 1, 1))
+            order   = mi.get("order", (1, 1, 1))
             s_order = mi.get("seasonal_order", (0, 0, 0, 0))
 
-            # ── Fit model_full ke FULL data (konsisten dengan train_sarima Step 1)
+            # Fit model_full ke FULL data
             model_full = SARIMAX(
-                monthly, order=order, seasonal_order=s_order,
-                enforce_stationarity=False, enforce_invertibility=False
+                monthly,
+                order=order,
+                seasonal_order=s_order,
+                enforce_stationarity=False,
+                enforce_invertibility=False
             ).fit(disp=False)
 
-            # ── Split 85/15 untuk RMSE/MAPE (konsisten dengan train_sarima Step 2)
+            # Split 85/15 untuk evaluasi
             split_  = max(int(len(monthly) * 0.85), len(monthly) - 6)
             train_, test_ = monthly.iloc[:split_], monthly.iloc[split_:]
+
             model_train = SARIMAX(
-                train_, order=order, seasonal_order=s_order,
-                enforce_stationarity=False, enforce_invertibility=False
+                train_,
+                order=order,
+                seasonal_order=s_order,
+                enforce_stationarity=False,
+                enforce_invertibility=False
             ).fit(disp=False)
 
             pred_  = model_train.get_forecast(steps=len(test_))
@@ -2373,7 +2326,7 @@ def main():
 
             sarima_models[villa] = {
                 **mi,
-                "model"    : model_full,   # ← full data untuk AIC
+                "model"    : model_full,
                 "train"    : train_,
                 "test"     : test_,
                 "monthly"  : monthly,
@@ -2387,6 +2340,7 @@ def main():
         except Exception:
             pass
 
+    # Make forecast
     fore_info_all = {}
     for villa, info in sarima_models.items():
         try:
