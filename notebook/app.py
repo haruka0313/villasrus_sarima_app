@@ -651,17 +651,23 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
             d                    = d,
             D                    = 1,           # dikunci seperti notebook
             m                    = m if use_seasonal else 1,
+            start_p              = 0,
+            start_q              = 0,
+            start_P              = 0,
+            start_Q              = 0,
             max_p                = 3,
             max_q                = 3,
             max_P                = 2,
             max_Q                = 2,
             seasonal             = use_seasonal,
-            stepwise             = True,
+            stepwise             = False,        # exhaustive search → deterministik, identik notebook
             information_criterion= "aic",
             error_action         = "ignore",
             suppress_warnings    = True,
             trace                = False,
             return_valid_fits    = True,
+            with_oob             = False,
+            n_jobs               = -1,           # paralel untuk kompensasi non-stepwise
         )
         if isinstance(all_fits, list) and len(all_fits) > 0:
             best_model = sorted(all_fits, key=lambda mdl: mdl.aic())[0]
