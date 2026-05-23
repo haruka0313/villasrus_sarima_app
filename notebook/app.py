@@ -2114,83 +2114,97 @@ def page_strategi(
 
                     # Sejajarkan index test aktual dan prediksi test
                     common_ex  = test_ex.index.intersection(pred_ex.index)
-                    act_vals   = test_ex.loc[common_ex].values
-                    pred_vals  = pred_ex.loc[common_ex].values
-                    n_pts      = len(common_ex)
                     n_total    = len(info_ex["monthly"])
 
-                    st.markdown(f"##### 📌 Contoh: **{title_ex}** ({n_total} bulan data, split 80/20)")
-                    st.markdown(f"""
-                    RMSE & MAPE dihitung dari **test set** (20% data terakhir = {n_pts} bulan),
-                    identik dengan notebook Cell 11 — model dilatih pada 80% data awal dan dievaluasi pada sisa {n_pts} bulan.
-                    - 📅 **Periode test:** {common_ex[0].strftime('%b %Y')} – {common_ex[-1].strftime('%b %Y')}
-                    - **n test =** {n_pts} bulan
-                    """)
+                    # Jika test kosong (model di-load dari DB), fallback ke monthly vs fitted
+                    if len(common_ex) == 0:
+                        monthly_ex = info_ex["monthly"]
+                        common_ex  = monthly_ex.index.intersection(pred_ex.index)
+                        act_vals   = monthly_ex.loc[common_ex].values
+                        pred_vals  = pred_ex.loc[common_ex].values
+                        n_pts      = len(common_ex)
+                        period_label = "in-sample (model di-load dari DB)"
+                    else:
+                        act_vals   = test_ex.loc[common_ex].values
+                        pred_vals  = pred_ex.loc[common_ex].values
+                        n_pts      = len(common_ex)
+                        period_label = f"test set 20% ({n_pts} bulan)"
 
-                    st.divider()
+                    if len(common_ex) == 0:
+                        st.info("Tidak ada data evaluasi tersedia. Latih ulang model untuk melihat perhitungan.")
+                    else:
+                        st.markdown(f"##### 📌 Contoh: **{title_ex}** ({n_total} bulan data)")
+                        st.markdown(f"""
+                        RMSE & MAPE dihitung dari **{period_label}**,
+                        identik dengan notebook Cell 11 — model dilatih pada 80% data awal dan dievaluasi pada sisa data.
+                        - 📅 **Periode:** {common_ex[0].strftime('%b %Y')} – {common_ex[-1].strftime('%b %Y')}
+                        - **n =** {n_pts} bulan
+                        """)
 
-                    err      = act_vals - pred_vals
-                    err_sq   = err ** 2
-                    abs_pct  = np.where(
-                        np.abs(act_vals) > 5,
-                        np.abs(err / act_vals) * 100,
-                        np.nan
-                    )
+                        st.divider()
 
-                    df_calc = pd.DataFrame({
-                        "Bulan":             common_ex.strftime("%b %Y"),
-                        "Aktual (%)":        np.round(act_vals, 2),
-                        "Fitted (%)":        np.round(pred_vals, 2),
-                        "Error (y−ŷ)":       np.round(err, 2),
-                        "Error² (y−ŷ)²":     np.round(err_sq, 4),
-                        "|Error/y| × 100%":  np.where(np.isnan(abs_pct), "—", np.round(abs_pct, 2)),
-                    })
-
-                    mse_val   = np.mean(err_sq)
-                    rmse_val  = np.sqrt(mse_val)
-                    mask_mape = np.abs(act_vals) > 5
-                    mape_val  = np.mean(abs_pct[mask_mape]) if mask_mape.sum() > 0 else np.nan
-
-                    total_row = pd.DataFrame([{
-                        "Bulan":             "**HASIL**",
-                        "Aktual (%)":        "—",
-                        "Fitted (%)":        "—",
-                        "Error (y−ŷ)":       "—",
-                        "Error² (y−ŷ)²":     f"Mean = {mse_val:.4f}",
-                        "|Error/y| × 100%":  f"Mean = {np.nanmean(abs_pct):.2f}%",
-                    }])
-
-                    st.dataframe(
-                        pd.concat([df_calc, total_row], ignore_index=True),
-                        use_container_width=True, hide_index=True
-                    )
-
-                    st.divider()
-
-                    col_r, col_m = st.columns(2)
-                    with col_r:
-                        st.markdown("**RMSE**")
-                        st.latex(r"\text{RMSE} = \sqrt{\frac{1}{n}\sum(y_i-\hat{y}_i)^2}")
-                        st.latex(
-                            rf"\text{{RMSE}} = \sqrt{{\frac{{1}}{{{n_pts}}}"
-                            rf"\times {np.sum(err_sq):.4f}}} = \mathbf{{{rmse_val:.4f}\%}}"
+                        err      = act_vals - pred_vals
+                        err_sq   = err ** 2
+                        abs_pct  = np.where(
+                            np.abs(act_vals) > 5,
+                            np.abs(err / act_vals) * 100,
+                            np.nan
                         )
-                        st.success(f"✅ RMSE = **{rmse_val:.4f}%**")
-                    with col_m:
-                        st.markdown("**MAPE**")
-                        st.latex(r"\text{MAPE} = \frac{1}{n}\sum\left|\frac{y_i-\hat{y}_i}{y_i}\right|\times100\%")
-                        valid_count = int(mask_mape.sum())
-                        mape_str = f"{mape_val:.4f}%" if not np.isnan(mape_val) else "—"
-                        st.latex(
-                            rf"\text{{MAPE}} = \frac{{1}}{{{valid_count}}}"
-                            rf"\times {np.nansum(abs_pct):.4f} = \mathbf{{{mape_str}}}"
-                        )
-                        st.success(f"✅ MAPE = **{mape_str}**")
 
-                    st.caption(
-                        f"*MAPE dihitung dari {valid_count} bulan dengan aktual > 5% "
-                        f"(dari total {n_pts} bulan)*"
-                    )
+                        df_calc = pd.DataFrame({
+                            "Bulan":             common_ex.strftime("%b %Y"),
+                            "Aktual (%)":        np.round(act_vals, 2),
+                            "Fitted (%)":        np.round(pred_vals, 2),
+                            "Error (y−ŷ)":       np.round(err, 2),
+                            "Error² (y−ŷ)²":     np.round(err_sq, 4),
+                            "|Error/y| × 100%":  np.where(np.isnan(abs_pct), "—", np.round(abs_pct, 2)),
+                        })
+
+                        mse_val   = np.mean(err_sq)
+                        rmse_val  = np.sqrt(mse_val)
+                        mask_mape = np.abs(act_vals) > 5
+                        mape_val  = np.mean(abs_pct[mask_mape]) if mask_mape.sum() > 0 else np.nan
+
+                        total_row = pd.DataFrame([{
+                            "Bulan":             "**HASIL**",
+                            "Aktual (%)":        "—",
+                            "Fitted (%)":        "—",
+                            "Error (y−ŷ)":       "—",
+                            "Error² (y−ŷ)²":     f"Mean = {mse_val:.4f}",
+                            "|Error/y| × 100%":  f"Mean = {np.nanmean(abs_pct):.2f}%",
+                        }])
+
+                        st.dataframe(
+                            pd.concat([df_calc, total_row], ignore_index=True),
+                            use_container_width=True, hide_index=True
+                        )
+
+                        st.divider()
+
+                        col_r, col_m = st.columns(2)
+                        with col_r:
+                            st.markdown("**RMSE**")
+                            st.latex(r"\text{RMSE} = \sqrt{\frac{1}{n}\sum(y_i-\hat{y}_i)^2}")
+                            st.latex(
+                                rf"\text{{RMSE}} = \sqrt{{\frac{{1}}{{{n_pts}}}"
+                                rf"\times {np.sum(err_sq):.4f}}} = \mathbf{{{rmse_val:.4f}\%}}"
+                            )
+                            st.success(f"✅ RMSE = **{rmse_val:.4f}%**")
+                        with col_m:
+                            st.markdown("**MAPE**")
+                            st.latex(r"\text{MAPE} = \frac{1}{n}\sum\left|\frac{y_i-\hat{y}_i}{y_i}\right|\times100\%")
+                            valid_count = int(mask_mape.sum())
+                            mape_str = f"{mape_val:.4f}%" if not np.isnan(mape_val) else "—"
+                            st.latex(
+                                rf"\text{{MAPE}} = \frac{{1}}{{{valid_count}}}"
+                                rf"\times {np.nansum(abs_pct):.4f} = \mathbf{{{mape_str}}}"
+                            )
+                            st.success(f"✅ MAPE = **{mape_str}**")
+
+                        st.caption(
+                            f"*MAPE dihitung dari {valid_count} bulan dengan aktual > 5% "
+                            f"(dari total {n_pts} bulan)*"
+                        )
 
             st.divider()
             c_sel, c_opt = st.columns([3, 1])
