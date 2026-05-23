@@ -2159,11 +2159,11 @@ def page_strategi(
 
                         df_calc = pd.DataFrame({
                             "Bulan":             common_ex.strftime("%b %Y"),
-                            "Aktual (%)":        np.round(act_vals, 2),
-                            "Fitted (%)":        np.round(pred_vals, 2),
-                            "Error (y−ŷ)":       np.round(err, 2),
-                            "Error² (y−ŷ)²":     np.round(err_sq, 4),
-                            "|Error/y| × 100%":  np.where(np.isnan(abs_pct), "—", np.round(abs_pct, 2)),
+                            "Aktual (%)":        [f"{v:.2f}" for v in act_vals],
+                            "Fitted (%)":        [f"{v:.2f}" for v in pred_vals],
+                            "Error (y−ŷ)":       [f"{v:.2f}" for v in err],
+                            "Error² (y−ŷ)²":     [f"{v:.4f}" for v in err_sq],
+                            "|Error/y| × 100%":  ["—" if np.isnan(v) else f"{v:.2f}" for v in abs_pct],
                         })
 
                         mse_val   = np.mean(err_sq)
@@ -2172,7 +2172,7 @@ def page_strategi(
                         mape_val  = np.mean(abs_pct[mask_mape]) if mask_mape.sum() > 0 else np.nan
 
                         total_row = pd.DataFrame([{
-                            "Bulan":             "**HASIL**",
+                            "Bulan":             "HASIL",
                             "Aktual (%)":        "—",
                             "Fitted (%)":        "—",
                             "Error (y−ŷ)":       "—",
@@ -2353,13 +2353,13 @@ def main():
         st.divider()
 
         if is_admin:
-            nav = st.radio("", [
+            nav = st.radio("Navigasi", [
                 "🏠 Dashboard Utama",
                 "📊 Strategi Hunian & Harga",
                 "📂 Manajemen Data",
             ], label_visibility="collapsed")
         else:
-            nav = st.radio("", [
+            nav = st.radio("Navigasi", [
                 "🏠 Dashboard Utama",
                 "📊 Strategi Hunian & Harga",
             ], label_visibility="collapsed")
@@ -2372,7 +2372,7 @@ def main():
                 unsafe_allow_html=True)
 
             selected_villas = st.multiselect(
-                "",
+                "Filter Vila",
                 options=list(villa_cfg.keys()),
                 default=list(villa_cfg.keys()),
                 format_func=lambda v: f"{v.replace('_villas','').title()} · {villa_cfg[v]['area'].title()}",
