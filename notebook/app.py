@@ -2060,7 +2060,6 @@ def page_strategi(
             st.dataframe(pd.DataFrame(status_rows), use_container_width=True, hide_index=True)
 
             with st.expander("ℹ️ Cara Perhitungan RMSE & MAPE — Contoh Data Aktual", expanded=False):
-                # Ambil satu vila yang sudah punya model sebagai contoh
                 example_villa = next(
                     (v for v in avail_tr if v in sarima_models), None
                 )
@@ -2068,44 +2067,44 @@ def page_strategi(
                     st.info("Belum ada model terlatih. Latih model terlebih dahulu untuk melihat contoh perhitungan.")
                 else:
                     info_ex   = sarima_models[example_villa]
-                    train_ex  = info_ex["train"]
-                    test_ex   = info_ex["test"]
-                    pred_ex   = info_ex["pred_mean"]
-                    n_total   = len(info_ex["monthly"])
-                    n_train   = len(train_ex)
-                    n_test    = len(test_ex)
+                    monthly_ex = info_ex["monthly"]
+                    pred_ex   = info_ex["pred_mean"]   # fitted values (full data)
+                    n_total   = len(monthly_ex)
                     title_ex  = example_villa.replace("_villas", "").title()
+
+                    # Sejajarkan index aktual dan fitted
+                    common_ex  = monthly_ex.index.intersection(pred_ex.index)
+                    act_vals   = monthly_ex.loc[common_ex].values
+                    pred_vals  = pred_ex.loc[common_ex].values
+                    n_pts      = len(common_ex)
 
                     st.markdown(f"##### 📌 Contoh: **{title_ex}** ({n_total} bulan data)")
                     st.markdown(f"""
-                    Data historis dibagi otomatis:
-                    - 🟦 **Train set:** {n_train} bulan ({train_ex.index[0].strftime('%b %Y')} – {train_ex.index[-1].strftime('%b %Y')}) → melatih model
-                    - 🟥 **Test set:** {n_test} bulan ({test_ex.index[0].strftime('%b %Y')} – {test_ex.index[-1].strftime('%b %Y')}) → menghitung error
+                    RMSE & MAPE dihitung dari **in-sample fitted values** (seluruh {n_pts} bulan),
+                    konsisten dengan metodologi notebook — tidak ada split train/test.
+                    - 📅 **Periode:** {common_ex[0].strftime('%b %Y')} – {common_ex[-1].strftime('%b %Y')}
+                    - **n =** {n_pts} bulan
                     """)
 
                     st.divider()
 
-                    # ── Tabel aktual vs prediksi ──
-                    act_vals  = test_ex.values
-                    pred_vals = pred_ex.values
-                    err       = act_vals - pred_vals
-                    err_sq    = err ** 2
-                    abs_pct   = np.where(
+                    err      = act_vals - pred_vals
+                    err_sq   = err ** 2
+                    abs_pct  = np.where(
                         np.abs(act_vals) > 5,
                         np.abs(err / act_vals) * 100,
                         np.nan
                     )
 
                     df_calc = pd.DataFrame({
-                        "Bulan":             test_ex.index.strftime("%b %Y"),
+                        "Bulan":             common_ex.strftime("%b %Y"),
                         "Aktual (%)":        np.round(act_vals, 2),
-                        "Prediksi (%)":      np.round(pred_vals, 2),
+                        "Fitted (%)":        np.round(pred_vals, 2),
                         "Error (y−ŷ)":       np.round(err, 2),
                         "Error² (y−ŷ)²":     np.round(err_sq, 4),
                         "|Error/y| × 100%":  np.where(np.isnan(abs_pct), "—", np.round(abs_pct, 2)),
                     })
 
-                    # Baris total/rata-rata
                     mse_val   = np.mean(err_sq)
                     rmse_val  = np.sqrt(mse_val)
                     mask_mape = np.abs(act_vals) > 5
@@ -2114,7 +2113,7 @@ def page_strategi(
                     total_row = pd.DataFrame([{
                         "Bulan":             "**HASIL**",
                         "Aktual (%)":        "—",
-                        "Prediksi (%)":      "—",
+                        "Fitted (%)":        "—",
                         "Error (y−ŷ)":       "—",
                         "Error² (y−ŷ)²":     f"Mean = {mse_val:.4f}",
                         "|Error/y| × 100%":  f"Mean = {np.nanmean(abs_pct):.2f}%",
@@ -2127,13 +2126,12 @@ def page_strategi(
 
                     st.divider()
 
-                    # ── Formula & hasil ──
                     col_r, col_m = st.columns(2)
                     with col_r:
                         st.markdown("**RMSE**")
                         st.latex(r"\text{RMSE} = \sqrt{\frac{1}{n}\sum(y_i-\hat{y}_i)^2}")
                         st.latex(
-                            rf"\text{{RMSE}} = \sqrt{{\frac{{1}}{{{n_test}}}"
+                            rf"\text{{RMSE}} = \sqrt{{\frac{{1}}{{{n_pts}}}"
                             rf"\times {np.sum(err_sq):.4f}}} = \mathbf{{{rmse_val:.4f}\%}}"
                         )
                         st.success(f"✅ RMSE = **{rmse_val:.4f}%**")
@@ -2150,7 +2148,7 @@ def page_strategi(
 
                     st.caption(
                         f"*MAPE dihitung dari {valid_count} bulan dengan aktual > 5% "
-                        f"(dari total {n_test} bulan test set)*"
+                        f"(dari total {n_pts} bulan)*"
                     )
 
             st.divider()
