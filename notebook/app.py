@@ -605,17 +605,24 @@ def run_detect_m_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFra
 def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> dict:
     monthly      = series.resample("MS").mean().dropna()
     use_seasonal = len(monthly) >= MIN_SEASONAL_TRAIN
-    max_pq       = 2 if d >= 1 else 3
-    max_PQ       = 1 if use_seasonal else 0
+
+    # ── UBAH INI (samakan dengan teks skripsi)
+    max_pq = 3      # was: 2 if d >= 1 else 3
+    max_PQ = 2      # was: 1
+
     split_idx    = max(int(len(monthly) * 0.85), len(monthly) - 6)
     train, test  = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
+
     try:
         auto = auto_arima(
             train,
             seasonal=use_seasonal, m=m if use_seasonal else 1,
-            d=d, D=None if use_seasonal else 0,
-            start_p=0, max_p=max_pq, start_q=0, max_q=max_pq,
-            start_P=0, max_P=max_PQ, start_Q=0, max_Q=max_PQ,
+            d=d,
+            D=1,                    # tetap dikunci D=1
+            start_p=0, max_p=max_pq,
+            start_q=0, max_q=max_pq,
+            start_P=0, max_P=max_PQ,
+            start_Q=0, max_Q=max_PQ,
             information_criterion="aic", stepwise=True,
             error_action="ignore", suppress_warnings=True, trace=False,
         )
@@ -1856,6 +1863,97 @@ def page_strategi(
                                 st.error(f"{mq_i} Pertimbangkan retrain atau tambah data historis.")
 
         # ─── TAB: TRAIN MODEL (Admin only) ───
+        # with tabs[3]:
+        #     section_header("Training Model SARIMA", "🚀")
+        #     st.markdown(
+        #         "Model dilatih menggunakan **Auto ARIMA** untuk menemukan order `(p,d,q)(P,D,Q)[m]` "
+        #         "terbaik berdasarkan AIC. Evaluasi menggunakan **RMSE** dan **MAPE**.")
+        #     avail_tr = [v for v in villa_cfg if v in clean_occ]
+        #     if not avail_tr:
+        #         st.warning("Tidak ada vila dengan data. Upload data terlebih dahulu.")
+        #         return
+        #     section_header("Status Model per Vila", "📋")
+        #     status_rows = []
+        #     for v in avail_tr:
+        #         mi = db_load_model(v)
+        #         status_rows.append({
+        #             "Vila":     v.replace("_villas", "").title(),
+        #             "Data":     f"{len(clean_occ[v].resample('MS').mean().dropna())} bln",
+        #             "d":        villa_d.get(v, "—"),
+        #             "m":        villa_m.get(v, "—"),
+        #             "Model":    "✅" if db_model_exists(v) else "❌ Belum ada",
+        #             "Dilatih":  db_model_trained_at(v),
+        #             "RMSE (%)": round(mi.get("rmse", 0), 2) if mi else "—",
+        #             "MAPE (%)": round(mi.get("mape", 0), 2) if mi else "—",
+        #         })
+        #     st.dataframe(pd.DataFrame(status_rows), use_container_width=True, hide_index=True)
+        #     st.divider()
+        #     c_sel, c_opt = st.columns([3, 1])
+        #     with c_sel:
+        #         train_sel = st.multiselect(
+        #             "Pilih Vila untuk Dilatih", avail_tr, default=avail_tr,
+        #             format_func=lambda v: (
+        #                 f"{v.replace('_villas','').title()} "
+        #                 f"{'✅' if db_model_exists(v) else '⚠️ belum terlatih'}"
+        #             ),
+        #         )
+        #     with c_opt:
+        #         force = st.checkbox("Force Retrain", value=False,
+        #             help="Centang untuk melatih ulang vila yang sudah punya model")
+        #     if st.button("🚀 Mulai Training", type="primary", use_container_width=True):
+        #         to_train = [v for v in train_sel if force or not db_model_exists(v)]
+        #         skipped  = [v for v in train_sel if not force and db_model_exists(v)]
+        #         if skipped:
+        #             st.info(f"⏭️ Dilewati (sudah ada model): "
+        #                     f"{', '.join(v.replace('_villas','').title() for v in skipped)}")
+        #         if not to_train:
+        #             st.warning("Tidak ada vila yang perlu dilatih. Centang **Force Retrain** untuk retrain.")
+        #         else:
+        #             pb       = st.progress(0)
+        #             status_t = st.empty()
+        #             results  = []
+        #             for i, villa in enumerate(to_train):
+        #                 t_v = villa.replace("_villas", "").title()
+        #                 status_t.text(f"⚙️ Training {t_v} ({i+1}/{len(to_train)})...")
+        #                 pb.progress(i / len(to_train))
+        #                 try:
+        #                     info_tr = train_sarima(
+        #                         clean_occ[villa],
+        #                         villa_d.get(villa, 1),
+        #                         villa_m.get(villa, 12),
+        #                         villa_cfg.get(villa, {}).get("color", "#2563EB"),
+        #                         t_v,
+        #                     )
+        #                     db_save_model(villa, info_tr)
+        #                     log_model(
+        #                         st.session_state.user["username"], villa,
+        #                         f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
+        #                         info_tr["model"].aic,
+        #                         info_tr.get("rmse", 0),
+        #                         info_tr.get("mape", 0),
+        #                     )
+        #                     st.session_state.setdefault("sarima_cache", {})[villa] = info_tr
+        #                     results.append({
+        #                         "Vila":     t_v,
+        #                         "Order":    f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
+        #                         "AIC":      round(info_tr["model"].aic, 2),
+        #                         "RMSE (%)": round(info_tr.get("rmse", 0), 2),
+        #                         "MAPE (%)": round(info_tr.get("mape", 0), 2),
+        #                         "Status":   "✅ Berhasil",
+        #                     })
+        #                 except Exception as e:
+        #                     results.append({"Vila": t_v, "Status": f"❌ {str(e)[:80]}"})
+        #             pb.progress(1.0)
+        #             status_t.text("✅ Training selesai!")
+        #             success_count = len([r for r in results if "✅" in r.get("Status", "")])
+        #             st.success(f"Berhasil melatih **{success_count}** dari {len(to_train)} vila.")
+        #             st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+        #             st.info("🔄 Refresh halaman untuk melihat hasil forecast terbaru.")
+        #     with st.expander("📋 Log Training"):
+        #         logs_m = get_model_log()
+        #         if logs_m:
+        #             st.dataframe(pd.DataFrame(logs_m), use_container_width=True, hide_index=True)
+          # ─── TAB: TRAIN MODEL (Admin only) ───
         with tabs[3]:
             section_header("Training Model SARIMA", "🚀")
             st.markdown(
@@ -1880,6 +1978,101 @@ def page_strategi(
                     "MAPE (%)": round(mi.get("mape", 0), 2) if mi else "—",
                 })
             st.dataframe(pd.DataFrame(status_rows), use_container_width=True, hide_index=True)
+
+            with st.expander("ℹ️ Cara Perhitungan RMSE & MAPE — Contoh Data Aktual", expanded=False):
+                # Ambil satu vila yang sudah punya model sebagai contoh
+                example_villa = next(
+                    (v for v in avail_tr if v in sarima_models), None
+                )
+                if example_villa is None:
+                    st.info("Belum ada model terlatih. Latih model terlebih dahulu untuk melihat contoh perhitungan.")
+                else:
+                    info_ex   = sarima_models[example_villa]
+                    train_ex  = info_ex["train"]
+                    test_ex   = info_ex["test"]
+                    pred_ex   = info_ex["pred_mean"]
+                    n_total   = len(info_ex["monthly"])
+                    n_train   = len(train_ex)
+                    n_test    = len(test_ex)
+                    title_ex  = example_villa.replace("_villas", "").title()
+
+                    st.markdown(f"##### 📌 Contoh: **{title_ex}** ({n_total} bulan data)")
+                    st.markdown(f"""
+                    Data historis dibagi otomatis:
+                    - 🟦 **Train set:** {n_train} bulan ({train_ex.index[0].strftime('%b %Y')} – {train_ex.index[-1].strftime('%b %Y')}) → melatih model
+                    - 🟥 **Test set:** {n_test} bulan ({test_ex.index[0].strftime('%b %Y')} – {test_ex.index[-1].strftime('%b %Y')}) → menghitung error
+                    """)
+
+                    st.divider()
+
+                    # ── Tabel aktual vs prediksi ──
+                    act_vals  = test_ex.values
+                    pred_vals = pred_ex.values
+                    err       = act_vals - pred_vals
+                    err_sq    = err ** 2
+                    abs_pct   = np.where(
+                        np.abs(act_vals) > 5,
+                        np.abs(err / act_vals) * 100,
+                        np.nan
+                    )
+
+                    df_calc = pd.DataFrame({
+                        "Bulan":             test_ex.index.strftime("%b %Y"),
+                        "Aktual (%)":        np.round(act_vals, 2),
+                        "Prediksi (%)":      np.round(pred_vals, 2),
+                        "Error (y−ŷ)":       np.round(err, 2),
+                        "Error² (y−ŷ)²":     np.round(err_sq, 4),
+                        "|Error/y| × 100%":  np.where(np.isnan(abs_pct), "—", np.round(abs_pct, 2)),
+                    })
+
+                    # Baris total/rata-rata
+                    mse_val   = np.mean(err_sq)
+                    rmse_val  = np.sqrt(mse_val)
+                    mask_mape = np.abs(act_vals) > 5
+                    mape_val  = np.mean(abs_pct[mask_mape]) if mask_mape.sum() > 0 else np.nan
+
+                    total_row = pd.DataFrame([{
+                        "Bulan":             "**HASIL**",
+                        "Aktual (%)":        "—",
+                        "Prediksi (%)":      "—",
+                        "Error (y−ŷ)":       "—",
+                        "Error² (y−ŷ)²":     f"Mean = {mse_val:.4f}",
+                        "|Error/y| × 100%":  f"Mean = {np.nanmean(abs_pct):.2f}%",
+                    }])
+
+                    st.dataframe(
+                        pd.concat([df_calc, total_row], ignore_index=True),
+                        use_container_width=True, hide_index=True
+                    )
+
+                    st.divider()
+
+                    # ── Formula & hasil ──
+                    col_r, col_m = st.columns(2)
+                    with col_r:
+                        st.markdown("**RMSE**")
+                        st.latex(r"\text{RMSE} = \sqrt{\frac{1}{n}\sum(y_i-\hat{y}_i)^2}")
+                        st.latex(
+                            rf"\text{{RMSE}} = \sqrt{{\frac{{1}}{{{n_test}}}"
+                            rf"\times {np.sum(err_sq):.4f}}} = \mathbf{{{rmse_val:.4f}\%}}"
+                        )
+                        st.success(f"✅ RMSE = **{rmse_val:.4f}%**")
+                    with col_m:
+                        st.markdown("**MAPE**")
+                        st.latex(r"\text{MAPE} = \frac{1}{n}\sum\left|\frac{y_i-\hat{y}_i}{y_i}\right|\times100\%")
+                        valid_count = int(mask_mape.sum())
+                        mape_str = f"{mape_val:.4f}%" if not np.isnan(mape_val) else "—"
+                        st.latex(
+                            rf"\text{{MAPE}} = \frac{{1}}{{{valid_count}}}"
+                            rf"\times {np.nansum(abs_pct):.4f} = \mathbf{{{mape_str}}}"
+                        )
+                        st.success(f"✅ MAPE = **{mape_str}**")
+
+                    st.caption(
+                        f"*MAPE dihitung dari {valid_count} bulan dengan aktual > 5% "
+                        f"(dari total {n_test} bulan test set)*"
+                    )
+
             st.divider()
             c_sel, c_opt = st.columns([3, 1])
             with c_sel:
@@ -1946,7 +2139,6 @@ def page_strategi(
                 logs_m = get_model_log()
                 if logs_m:
                     st.dataframe(pd.DataFrame(logs_m), use_container_width=True, hide_index=True)
-
 # ══════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════
