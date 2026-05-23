@@ -63,13 +63,13 @@ VILLA_COLORS = [
 ]
 
 DEFAULT_VILLAS = [
-    ("briana_villas",   "canggu",   "#2563EB"),
+    ("briana_villas",   "canggu",   "#3D6BE8"),
     ("castello_villas", "canggu",   "#7C3AED"),
     ("elina_villas",    "canggu",   "#059669"),
     ("isola_villas",    "canggu",   "#DB2777"),
     ("eindra_villas",   "seminyak", "#D97706"),
     ("esha_villas",     "seminyak", "#B45309"),
-    ("ozamiz_villas",   "seminyak", "#0891B2"),
+    ("ozamiz_villas",   "seminyak", "#9333EA"),
 ]
 
 OCCUPANCY_ATTRS = [
@@ -568,14 +568,15 @@ def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
     """
     Identik dengan notebook Cell 8:
     - d=0 jika stasioner di level
-    - d=1 jika tidak stasioner (CAP di sini, tidak lanjut d=2)
-    - d di-min dengan 1 (lindungi dari overfit pada data pendek)
+    - d=1 jika stasioner setelah diff(1)
+    - d=2 jika masih belum stasioner setelah diff(1)
     """
     villa_d, rows = {}, []
     for villa, series in clean_occ.items():
         monthly = series.resample("MS").mean().dropna()
         res0    = adf_test(monthly)
         p1_val  = "-"
+        p2_val  = "-"
 
         if res0["stationary"]:
             d    = 0
@@ -584,15 +585,18 @@ def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
             diff1  = monthly.diff().dropna()
             res1   = adf_test(diff1)
             p1_val = res1["pvalue"]
-            d      = 1
-            if res1["stationary"]:
-                note = f"🔄 Diff(1) stasioner (p_level={res0['pvalue']} -> p_diff1={p1_val})"
-            else:
-                note = (f"⚠️ Diff(1) belum stasioner sempurna (p={p1_val}), "
-                        f"tapi d=1 tetap dipakai (cap d_max=1)")
 
-        # CAP d=1 — sama persis dengan notebook
-        d = min(d, 1)
+            if res1["stationary"]:
+                d    = 1
+                note = f"🔄 Diff(1) stasioner (p_level={res0['pvalue']} → p_diff1={p1_val})"
+            else:
+                diff2  = monthly.diff().diff().dropna()
+                res2   = adf_test(diff2)
+                p2_val = res2["pvalue"]
+                d      = 2
+                note   = (f"🔄 Diff(2) stasioner (p_level={res0['pvalue']} → "
+                          f"p_diff1={p1_val} → p_diff2={p2_val})")
+
         villa_d[villa] = d
 
         rows.append({
@@ -602,6 +606,7 @@ def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
             "ADF (level)":  res0["statistic"],
             "p (level)":    res0["pvalue"],
             "p (diff1)":    p1_val,
+            "p (diff2)":    p2_val,
             "d dipakai":    d,
             "Keterangan":   note,
         })
@@ -631,8 +636,9 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
     """
     Identik dengan notebook Cell 9 & 11:
     - auto_arima: D=1 dikunci, return_valid_fits=True, pilih AIC terkecil
+    - d diteruskan dari run_adf_all (bisa 0, 1, atau 2) — identik notebook Cell 8
     - Split: 80% train / 20% test
-    - Evaluasi: RMSE & SMAPE dihitung pada TEST SET
+    - Evaluasi: RMSE & SMAPE dihitung pada TEST SET (identik Cell 11 notebook)
     - model_full: refit seluruh data untuk forecast
     """
     monthly      = series.resample("MS").mean().dropna()
@@ -2102,23 +2108,23 @@ def page_strategi(
                     st.info("Belum ada model terlatih. Latih model terlebih dahulu untuk melihat contoh perhitungan.")
                 else:
                     info_ex   = sarima_models[example_villa]
-                    monthly_ex = info_ex["monthly"]
-                    pred_ex   = info_ex["pred_mean"]   # fitted values (full data)
-                    n_total   = len(monthly_ex)
+                    test_ex   = info_ex["test"]
+                    pred_ex   = info_ex["pred_mean"]
                     title_ex  = example_villa.replace("_villas", "").title()
 
-                    # Sejajarkan index aktual dan fitted
-                    common_ex  = monthly_ex.index.intersection(pred_ex.index)
-                    act_vals   = monthly_ex.loc[common_ex].values
+                    # Sejajarkan index test aktual dan prediksi test
+                    common_ex  = test_ex.index.intersection(pred_ex.index)
+                    act_vals   = test_ex.loc[common_ex].values
                     pred_vals  = pred_ex.loc[common_ex].values
                     n_pts      = len(common_ex)
+                    n_total    = len(info_ex["monthly"])
 
-                    st.markdown(f"##### 📌 Contoh: **{title_ex}** ({n_total} bulan data)")
+                    st.markdown(f"##### 📌 Contoh: **{title_ex}** ({n_total} bulan data, split 80/20)")
                     st.markdown(f"""
-                    RMSE & MAPE dihitung dari **in-sample fitted values** (seluruh {n_pts} bulan),
-                    konsisten dengan metodologi notebook — tidak ada split train/test.
-                    - 📅 **Periode:** {common_ex[0].strftime('%b %Y')} – {common_ex[-1].strftime('%b %Y')}
-                    - **n =** {n_pts} bulan
+                    RMSE & MAPE dihitung dari **test set** (20% data terakhir = {n_pts} bulan),
+                    identik dengan notebook Cell 11 — model dilatih pada 80% data awal dan dievaluasi pada sisa {n_pts} bulan.
+                    - 📅 **Periode test:** {common_ex[0].strftime('%b %Y')} – {common_ex[-1].strftime('%b %Y')}
+                    - **n test =** {n_pts} bulan
                     """)
 
                     st.divider()
