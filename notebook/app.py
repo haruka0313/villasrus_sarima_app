@@ -644,12 +644,14 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
     monthly      = series.resample("MS").mean().dropna()
     use_seasonal = len(monthly) >= MIN_SEASONAL_TRAIN
 
-    # ── auto_arima pada FULL data → pilih order (identik Cell 9 notebook)
+    # ── Hybrid: stepwise auto_arima + targeted SARIMAX grid search
+    # Stepwise cepat untuk kandidat awal, lalu grid search terbatas
+    # pada (P,Q) seasonal agar hasil konsisten dengan notebook Cell 9
     try:
-        all_fits = auto_arima(
+        stepwise_fits = auto_arima(
             monthly,
             d                    = d,
-            D                    = 1,           # dikunci seperti notebook
+            D                    = 1,
             m                    = m if use_seasonal else 1,
             start_p              = 0,
             start_q              = 0,
@@ -660,21 +662,48 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
             max_P                = 2,
             max_Q                = 2,
             seasonal             = use_seasonal,
-            stepwise             = False,        # exhaustive search → deterministik, identik notebook
+            stepwise             = True,
             information_criterion= "aic",
             error_action         = "ignore",
             suppress_warnings    = True,
             trace                = False,
             return_valid_fits    = True,
-            with_oob             = False,
-            n_jobs               = -1,           # paralel untuk kompensasi non-stepwise
         )
-        if isinstance(all_fits, list) and len(all_fits) > 0:
-            best_model = sorted(all_fits, key=lambda mdl: mdl.aic())[0]
-        else:
-            best_model = all_fits
-        order          = best_model.order
-        seasonal_order = best_model.seasonal_order
+        sw_list = stepwise_fits if isinstance(stepwise_fits, list) else [stepwise_fits]
+
+        # Ambil p,q terbaik dari stepwise lalu grid seasonal (P,Q) dalam {0,1,2}x{0,1,2}
+        best_sw = sorted(sw_list, key=lambda mdl: mdl.aic())[0]
+        best_p, _, best_q = best_sw.order
+
+        best_aic    = float("inf")
+        best_order  = best_sw.order
+        best_sorder = best_sw.seasonal_order
+
+        if use_seasonal:
+            p_candidates = sorted(set([0, best_p, max(0, best_p - 1), min(3, best_p + 1)]))
+            q_candidates = sorted(set([0, best_q, max(0, best_q - 1), min(3, best_q + 1)]))
+            for p_try in p_candidates:
+                for q_try in q_candidates:
+                    for P_try in range(0, 3):
+                        for Q_try in range(0, 3):
+                            try:
+                                fit = SARIMAX(
+                                    monthly,
+                                    order=(p_try, d, q_try),
+                                    seasonal_order=(P_try, 1, Q_try, m),
+                                    enforce_stationarity=False,
+                                    enforce_invertibility=False,
+                                ).fit(disp=False)
+                                if fit.aic < best_aic:
+                                    best_aic    = fit.aic
+                                    best_order  = (p_try, d, q_try)
+                                    best_sorder = (P_try, 1, Q_try, m)
+                            except Exception:
+                                continue
+
+        order          = best_order
+        seasonal_order = best_sorder
+
     except Exception:
         order          = (1, d, 0)
         seasonal_order = (0, 1, 0, m if use_seasonal else 0)
