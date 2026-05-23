@@ -47,6 +47,7 @@ load_dotenv()
 FORECAST_STEPS         = 6
 MIN_SEASONAL_TRAIN     = 30
 FLAT_STD_THRESH        = 1.5
+# ── Identik notebook Cell 7b ──
 MIN_CYCLES             = 2
 ACF_ALPHA              = 0.10
 FALLBACK_M             = 12
@@ -240,7 +241,6 @@ def db_delete_villa(villa: str):
     sb.table("villa_config").delete().eq("villa", villa).execute()
     sb.table("raw_data").delete().eq("villa", villa).execute()
     sb.table("models").delete().eq("villa", villa).execute()
-    # Hapus pkl dari Storage
     try:
         sb.storage.from_(MODEL_BUCKET).remove([f"{villa}.pkl"])
     except Exception:
@@ -312,7 +312,7 @@ def _parse_csv(content: str) -> pd.DataFrame:
 # ── Model — disimpan ke Supabase Storage ──
 def db_save_model(villa: str, info: dict):
     sb = get_supabase()
-    saveable = {k: v for k, v in info.items() if k not in ("model",)}
+    saveable = {k: v for k, v in info.items() if k not in ("model", "model_train")}
     pkl_bytes = pickle.dumps(saveable)
     order_str = f"SARIMA{info['order']}x{info['seasonal_order']}"
     try:
@@ -519,64 +519,92 @@ def adf_test(series: pd.Series) -> dict:
         "critical":  {k: round(v, 3) for k, v in res[4].items()},
     }
 
+
 def detect_m(monthly: pd.Series) -> tuple[int, str]:
+    """
+    Identik dengan notebook Cell 7b:
+    1. Periodogram FFT → periode power tertinggi yang lolos guard (4 ≤ m ≤ n // MIN_CYCLES)
+    2. ACF → spike signifikan pertama sebagai fallback
+    3. Prioritas: periodogram > acf_only > fallback (m=12)
+    """
     n = len(monthly)
+
+    # ── 1. Periodogram
     freqs, power = scipy_periodogram(monthly.values)
-    valid = freqs[1:] > 0
-    periods = np.round(1.0 / freqs[1:][valid]).astype(int)
-    pwr     = power[1:][valid]
-    pp = {}
-    for p, pw in zip(periods, pwr):
-        if p not in pp or pw > pp[p]:
-            pp[p] = pw
-    pgram_m = next(
-        (int(p) for p in sorted(pp, key=pp.get, reverse=True) if 4 <= p <= n // MIN_CYCLES),
-        None
-    )
-    if pgram_m is None:
-        nlags = min(n // 2, 36)
-        try:
-            acf_vals, ci = sm_acf(monthly, nlags=nlags, alpha=ACF_ALPHA, fft=True)
-            for lag in range(4, nlags + 1):
-                if lag <= n // MIN_CYCLES:
-                    if abs(acf_vals[lag]) > abs(ci[lag][1] - acf_vals[lag]):
-                        return lag, "acf"
-        except Exception:
-            pass
+    valid_mask  = freqs[1:] > 0
+    periods_raw = 1.0 / freqs[1:][valid_mask]
+    power_raw   = power[1:][valid_mask]
+
+    periods_int = np.round(periods_raw).astype(int)
+    period_power: dict = {}
+    for p, pw in zip(periods_int, power_raw):
+        if p not in period_power or pw > period_power[p]:
+            period_power[p] = pw
+
+    sorted_periods = sorted(period_power, key=period_power.get, reverse=True)
+
+    pgram_m = None
+    for p in sorted_periods:
+        if 4 <= p <= n // MIN_CYCLES:
+            pgram_m = int(p)
+            break
+
+    # ── 2. ACF — cari spike signifikan pertama (identik notebook)
+    nlags = min(n // 2, 36)
+    acf_spike_m = None
+    try:
+        acf_vals, ci = sm_acf(monthly, nlags=nlags, alpha=ACF_ALPHA, fft=True)
+        for lag in range(4, nlags + 1):
+            if 4 <= lag <= n // MIN_CYCLES:
+                outside = (acf_vals[lag] > ci[lag][1] - acf_vals[lag] or
+                           acf_vals[lag] < ci[lag][0] - acf_vals[lag])
+                if outside:
+                    acf_spike_m = lag
+                    break
+    except Exception:
+        pass
+
+    # ── 3. Pilih m final (prioritas: periodogram > acf_only > fallback)
+    if pgram_m is not None:
+        return pgram_m, "periodogram"
+    elif acf_spike_m is not None:
+        return acf_spike_m, "acf_only"
+    else:
         return FALLBACK_M, "fallback"
-    return pgram_m, "periodogram"
+
 
 def compute_rmse(actual, predicted) -> float:
     return float(np.sqrt(mean_squared_error(actual, predicted)))
 
+
 def compute_smape(actual: np.ndarray, predicted: np.ndarray) -> float:
     """
-    Symmetric Mean Absolute Percentage Error — identik dengan notebook Cell 11.
-    Menghindari division by zero jika keduanya nol.
+    Symmetric Mean Absolute Percentage Error — identik notebook Cell 9.
+    Menghindari division-by-zero jika keduanya nol.
     """
     actual    = np.array(actual, dtype=float)
     predicted = np.array(predicted, dtype=float)
     denom     = (np.abs(actual) + np.abs(predicted)) / 2.0
-    denom     = np.where(denom == 0, 1.0, denom)   # hindari inf
+    denom     = np.where(denom == 0, 1.0, denom)
     return float(np.mean(np.abs(actual - predicted) / denom) * 100)
 
-# Alias agar bagian UI lama yang masih pakai compute_mape tidak error
+# Alias agar bagian UI yang masih pakai compute_mape tidak error
 def compute_mape(actual: np.ndarray, predicted: np.ndarray) -> float:
     return compute_smape(actual, predicted)
 
+
 def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
     """
-    Identik dengan notebook Cell 8:
+    Identik notebook Cell 8 (versi fix-B):
+    - d di-CAP maksimum 1 (d=2 tidak stabil untuk data pendek)
     - d=0 jika stasioner di level
-    - d=1 jika stasioner setelah diff(1)
-    - d=2 jika masih belum stasioner setelah diff(1)
+    - d=1 selainnya (meski diff(1) belum sempurna stasioner)
     """
     villa_d, rows = {}, []
     for villa, series in clean_occ.items():
         monthly = series.resample("MS").mean().dropna()
         res0    = adf_test(monthly)
         p1_val  = "-"
-        p2_val  = "-"
 
         if res0["stationary"]:
             d    = 0
@@ -585,34 +613,29 @@ def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
             diff1  = monthly.diff().dropna()
             res1   = adf_test(diff1)
             p1_val = res1["pvalue"]
-
+            d      = 1   # CAP d=1 — identik notebook fix-B
             if res1["stationary"]:
-                d    = 1
                 note = f"🔄 Diff(1) stasioner (p_level={res0['pvalue']} → p_diff1={p1_val})"
             else:
-                diff2  = monthly.diff().diff().dropna()
-                res2   = adf_test(diff2)
-                p2_val = res2["pvalue"]
-                d      = 2
-                note   = (f"🔄 Diff(2) stasioner (p_level={res0['pvalue']} → "
-                          f"p_diff1={p1_val} → p_diff2={p2_val})")
+                note = (f"⚠️ Diff(1) belum sempurna (p={p1_val}), "
+                        f"tapi d=1 tetap dipakai (cap d_max=1)")
 
         villa_d[villa] = d
-
         rows.append({
-            "Vila":         villa.replace("_villas", "").title(),
-            "Area":         villa_cfg.get(villa, {}).get("area", "").title(),
-            "N (bln)":      len(monthly),
-            "ADF (level)":  res0["statistic"],
-            "p (level)":    res0["pvalue"],
-            "p (diff1)":    p1_val,
-            "p (diff2)":    p2_val,
-            "d dipakai":    d,
-            "Keterangan":   note,
+            "Vila":        villa.replace("_villas", "").title(),
+            "Area":        villa_cfg.get(villa, {}).get("area", "").title(),
+            "N (bln)":     len(monthly),
+            "ADF (level)": res0["statistic"],
+            "p (level)":   res0["pvalue"],
+            "p (diff1)":   p1_val,
+            "d dipakai":   d,
+            "Keterangan":  note,
         })
     return villa_d, pd.DataFrame(rows)
 
+
 def run_detect_m_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
+    """Identik notebook Cell 7b — jalankan detect_m per villa."""
     villa_m, rows = {}, []
     for villa, series in clean_occ.items():
         monthly = series.resample("MS").mean().dropna()
@@ -632,23 +655,29 @@ def run_detect_m_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFra
 # ══════════════════════════════════════════════════════════════
 # SARIMA — TRAINING & FORECAST
 # ══════════════════════════════════════════════════════════════
+
 def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> dict:
     """
-    Identik dengan notebook Cell 9 & 11:
-    - auto_arima: D=1 dikunci, return_valid_fits=True, pilih AIC terkecil
-    - d diteruskan dari run_adf_all (bisa 0, 1, atau 2) — identik notebook Cell 8
-    - Split: 80% train / 20% test
-    - Evaluasi: RMSE & SMAPE dihitung pada TEST SET (identik Cell 11 notebook)
-    - model_full: refit seluruh data untuk forecast
+    Identik notebook Cell 9 (dengan fix return_valid_fits):
+
+    [FIX-1] return_valid_fits dihapus — menyebabkan bug tuple.aic() di pmdarima terbaru.
+            auto_arima langsung return 1 best model → lebih aman & konsisten.
+
+    Pipeline:
+    ─────────
+    1. auto_arima (stepwise) → kandidat terbaik p, q
+    2. Grid search SARIMAX: p ∈ kandidat, q ∈ kandidat, P ∈ {0,1,2}, Q ∈ {0,1,2}
+       → pilih berdasarkan AIC terkecil (identik notebook)
+    3. Split 80/20 → model_train (80%) untuk RMSE & SMAPE pada TEST SET
+    4. model_full (100%) untuk AIC final & forecast masa depan
+    5. Return dict lengkap termasuk train_fitted (identik notebook)
     """
     monthly      = series.resample("MS").mean().dropna()
     use_seasonal = len(monthly) >= MIN_SEASONAL_TRAIN
 
-    # ── Hybrid: stepwise auto_arima + targeted SARIMAX grid search
-    # Stepwise cepat untuk kandidat awal, lalu grid search terbatas
-    # pada (P,Q) seasonal agar hasil konsisten dengan notebook Cell 9
     try:
-        stepwise_fits = auto_arima(
+        # ── Step 1: auto_arima (stepwise) — FIX-1: hapus return_valid_fits
+        best_sw = auto_arima(
             monthly,
             d                    = d,
             D                    = 1,
@@ -667,14 +696,11 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
             error_action         = "ignore",
             suppress_warnings    = True,
             trace                = False,
-            return_valid_fits    = True,
+            # return_valid_fits DIHAPUS — bug tuple.aic() di pmdarima terbaru
         )
-        sw_list = stepwise_fits if isinstance(stepwise_fits, list) else [stepwise_fits]
-
-        # Ambil p,q terbaik dari stepwise lalu grid seasonal (P,Q) dalam {0,1,2}x{0,1,2}
-        best_sw = sorted(sw_list, key=lambda mdl: mdl.aic())[0]
         best_p, _, best_q = best_sw.order
 
+        # ── Step 2: Grid search SARIMAX — identik notebook Cell 9
         best_aic    = float("inf")
         best_order  = best_sw.order
         best_sorder = best_sw.seasonal_order
@@ -711,11 +737,12 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
     if order == (0, 0, 0) and seasonal_order[:3] == (0, 0, 0):
         order = (1, d, 0)
 
-    # ── Split 80/20 → evaluasi pada test set (identik Cell 11 notebook)
+    # ── Step 3: Split 80/20 — identik notebook Cell 9
     n_test    = max(int(len(monthly) * 0.20), 3)
     split_idx = len(monthly) - n_test
     train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
 
+    # ── Step 4: model_train (80%) — RMSE & SMAPE dihitung pada TEST SET
     try:
         model_train = SARIMAX(
             train,
@@ -741,7 +768,7 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
     rmse_val  = compute_rmse(test.values, pred_mean.values)
     smape_val = compute_smape(test.values, pred_mean.values)
 
-    # ── Refit pada SELURUH data → untuk AIC final & forecast masa depan
+    # ── Step 5: model_full (100%) — AIC final & forecast masa depan
     try:
         model_full = SARIMAX(
             monthly,
@@ -753,6 +780,7 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
     except Exception:
         model_full = model_train
 
+    # train_fitted — identik notebook Cell 9
     train_fitted = model_train.fittedvalues.clip(0, 100)
 
     return {
@@ -766,21 +794,36 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
         "d"             : d,
         "m"             : m,
         "use_seasonal"  : use_seasonal,
-        "pred_mean"     : pred_mean,
-        "pred_ci"       : pred_ci,
-        "train_fitted"  : train_fitted,
-        "rmse"          : rmse_val,
-        "mape"          : smape_val,
-        "smape"         : smape_val,
+        "pred_mean"     : pred_mean,       # get_forecast pada TEST SET 20%
+        "pred_ci"       : pred_ci,         # conf_int alpha=0.10
+        "train_fitted"  : train_fitted,    # fittedvalues model_train
+        "rmse"          : rmse_val,        # RMSE pada test set
+        "mape"          : smape_val,       # SMAPE pada test set (alias)
+        "smape"         : smape_val,       # SMAPE pada test set
         "color"         : color,
         "title"         : title,
     }
 
 
 def make_forecast(info: dict) -> dict:
+    """
+    Identik notebook Cell 10:
+    - Refit model_full pada seluruh data
+    - Deteksi forecast flat (std < FLAT_STD_THRESH) → retry seasonal
+    - SEASONAL_RETRY menggunakan m dari info (bukan hardcode)
+    """
     monthly = info["monthly"]
     order, s_order, d = info["order"], info["seasonal_order"], info["d"]
     m = info.get("m", FALLBACK_M)
+
+    # SEASONAL_RETRY identik notebook Cell 10 FIX-D: pakai m_used
+    SEASONAL_RETRY = [
+        (1, 0, 0, m),
+        (0, 0, 1, m),
+        (1, 0, 1, m),
+    ]
+
+    # ── Refit pada SELURUH data (identik notebook)
     try:
         model_full = SARIMAX(
             monthly, order=order, seasonal_order=s_order,
@@ -788,27 +831,46 @@ def make_forecast(info: dict) -> dict:
         ).fit(disp=False)
     except Exception:
         model_full = info["model"]
+
     fore_obj  = model_full.get_forecast(steps=FORECAST_STEPS)
     fore_mean = fore_obj.predicted_mean.clip(0, 100)
     fore_ci   = fore_obj.conf_int(alpha=0.10).clip(0, 100)
-    is_flat = fore_mean.std() < FLAT_STD_THRESH
+    is_flat   = fore_mean.std() < FLAT_STD_THRESH
+
+    # ── Retry jika flat — identik notebook Cell 10
     if is_flat:
-        for s_cand in [(1, 0, 0, m), (0, 0, 1, m), (1, 0, 1, m)]:
+        best_aic    = model_full.aic
+        best_fore   = fore_mean
+        best_ci     = fore_ci
+        best_sorder = s_order
+
+        for s_cand in SEASONAL_RETRY:
             try:
                 mc = SARIMAX(
-                    monthly, order=(order[0], d, order[2]), seasonal_order=s_cand,
-                    enforce_stationarity=False, enforce_invertibility=False
+                    monthly,
+                    order=(order[0], d, order[2]),
+                    seasonal_order=s_cand,
+                    enforce_stationarity=False,
+                    enforce_invertibility=False,
                 ).fit(disp=False)
-                fc = mc.get_forecast(steps=FORECAST_STEPS)
+                fc      = mc.get_forecast(steps=FORECAST_STEPS)
                 fc_mean = fc.predicted_mean.clip(0, 100)
-                if fc_mean.std() > FLAT_STD_THRESH and mc.aic < model_full.aic + 10:
-                    fore_mean = fc_mean
-                    fore_ci   = fc.conf_int(alpha=0.10).clip(0, 100)
-                    s_order   = s_cand
-                    is_flat   = False
+                fc_ci   = fc.conf_int(alpha=0.10).clip(0, 100)
+                std_cand = fc_mean.std()
+                if std_cand > FLAT_STD_THRESH and mc.aic < best_aic + 10:
+                    best_aic    = mc.aic
+                    best_fore   = fc_mean
+                    best_ci     = fc_ci
+                    best_sorder = s_cand
+                    is_flat     = False
                     break
             except Exception:
                 continue
+
+        fore_mean = best_fore
+        fore_ci   = best_ci
+        s_order   = best_sorder
+
     return {
         "fore_mean":    fore_mean,
         "fore_ci":      fore_ci,
@@ -945,14 +1007,17 @@ def chart_acf_pacf(monthly: pd.Series, m: int, color: str, title: str) -> go.Fig
     return fig
 
 def chart_model_fit(info: dict) -> go.Figure:
-    """Chart model fit identik dengan notebook Cell 10:
-    train (abu) + test aktual (hitam) + prediksi test (warna villa) + CI"""
-    train, test   = info["train"], info["test"]
-    pred_mean     = info["pred_mean"]   # prediksi pada test set
-    pred_ci       = info["pred_ci"]
-    color, title  = info["color"], info["title"]
-    rmse          = info["rmse"]
-    smape         = info.get("smape", info.get("mape", float("nan")))
+    """
+    Identik notebook Cell 10:
+    train (abu) + test aktual (hitam) + prediksi test (warna villa) + CI 90%
+    pred_mean = get_forecast pada TEST SET 20% (bukan in-sample)
+    """
+    train, test  = info["train"], info["test"]
+    pred_mean    = info["pred_mean"]   # prediksi pada TEST SET
+    pred_ci      = info["pred_ci"]
+    color, title = info["color"], info["title"]
+    rmse         = info["rmse"]
+    smape        = info.get("smape", info.get("mape", float("nan")))
 
     fig = go.Figure()
     # CI band
@@ -992,13 +1057,14 @@ def chart_model_fit(info: dict) -> go.Figure:
 
 
 def chart_forecast(info: dict, fore: dict) -> go.Figure:
-    """Identik dengan notebook Cell 10: history + test aktual + fitted test + forecast"""
-    monthly    = info["monthly"]
-    train, test = info["train"], info["test"]
+    """Identik notebook Cell 10: history + test aktual + fitted test + forecast."""
+    monthly      = info["monthly"]
+    train, test  = info["train"], info["test"]
     color, title = info["color"], info["title"]
     fore_mean, fore_ci = fore["fore_mean"], fore["fore_ci"]
-    is_flat    = fore["is_flat"]
-    fore_color = "#EF4444" if is_flat else color
+    is_flat      = fore["is_flat"]
+    fore_color   = "#EF4444" if is_flat else color
+
     fig = go.Figure()
     # CI forecast
     fig.add_trace(go.Scatter(
@@ -1006,7 +1072,7 @@ def chart_forecast(info: dict, fore: dict) -> go.Figure:
         y=list(fore_ci.iloc[:, 1]) + list(fore_ci.iloc[:, 0]),
         fill="toself", fillcolor=hex_rgba(fore_color, 0.10),
         line=dict(color="rgba(0,0,0,0)"), name="CI 90%", hoverinfo="skip"))
-    # History (train)
+    # History
     fig.add_trace(go.Scatter(x=monthly.index, y=monthly.values,
         line=dict(color="#9CA3AF", width=1.5), name="Historis",
         hovertemplate="<b>%{x|%b %Y}</b><br>Historis: %{y:.1f}%<extra></extra>"))
@@ -1016,7 +1082,7 @@ def chart_forecast(info: dict, fore: dict) -> go.Figure:
             line=dict(color="#111827", width=2), mode="lines+markers",
             marker=dict(size=5), name="Aktual (Test)",
             hovertemplate="<b>%{x|%b %Y}</b><br>Aktual: %{y:.1f}%<extra></extra>"))
-    # Fitted pada test (prediksi model_train ke test)
+    # Fitted pada test (pred_mean dari model_train → test set)
     fig.add_trace(go.Scatter(x=info["pred_mean"].index, y=info["pred_mean"].values,
         line=dict(color=color, width=1.5, dash="dot"), name="Fitted (Test)", opacity=0.7,
         hovertemplate="<b>%{x|%b %Y}</b><br>Fitted: %{y:.1f}%<extra></extra>"))
@@ -1166,11 +1232,11 @@ def model_quality_badge(mape: float) -> tuple[str, str]:
     if np.isnan(mape):
         return "⚪", "Belum dievaluasi"
     if mape < 10:
-        return "🟢", f"Sangat Baik (MAPE={mape:.1f}%)"
+        return "🟢", f"Sangat Baik (SMAPE={mape:.1f}%)"
     elif mape < 20:
-        return "🟡", f"Cukup Baik (MAPE={mape:.1f}%)"
+        return "🟡", f"Cukup Baik (SMAPE={mape:.1f}%)"
     else:
-        return "🔴", f"Perlu Review (MAPE={mape:.1f}%)"
+        return "🔴", f"Perlu Review (SMAPE={mape:.1f}%)"
 
 def period_filter(clean_occ: dict, key: str) -> tuple:
     all_dates = []
@@ -1343,8 +1409,8 @@ def page_dashboard(clean_occ: dict, clean_fin: dict, villa_cfg: dict):
         if is_admin:
             mi = db_load_model(villa)
             if mi:
-                row["RMSE (%)"] = round(mi.get("rmse", 0), 2)
-                row["MAPE (%)"] = round(mi.get("mape", 0), 2)
+                row["RMSE (%)"]  = round(mi.get("rmse", 0), 2)
+                row["SMAPE (%)"] = round(mi.get("mape", 0), 2)
         rows.append(row)
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -1394,7 +1460,7 @@ def page_manajemen_data(villa_cfg: dict):
                 df_up.columns = df_up.columns.str.strip()
                 date_col = _find_col(df_up, ["date", "tanggal", "tgl"])
                 if not date_col:
-                    st.error("❌ Kolom tanggal tidak ditemukan. Pastikan ada kolom 'Date', 'Tanggal', atau 'Tgl'.")
+                    st.error("❌ Kolom tanggal tidak ditemukan.")
                 else:
                     n_rows  = len(df_up)
                     merged  = db_save_data(villa_sel, dtype, uploaded.name, content, n_rows)
@@ -1426,9 +1492,8 @@ def page_manajemen_data(villa_cfg: dict):
             st.info("Belum ada data tersimpan di database.")
 
     # ── Preview & Hapus ──
-   # ── Preview & Hapus ──
     with tab_preview:
-        section_header("Preview Data", "🔍")  # ← BENAR, indent 8 spasi
+        section_header("Preview Data", "🔍")
         c1, c2 = st.columns(2)
         with c1:
             prev_villa = st.selectbox(
@@ -1538,8 +1603,7 @@ def page_manajemen_data(villa_cfg: dict):
             with c2:
                 np_ = st.text_input("Password", type="password")
             with c3:
-                role_ = st.selectbox("Role", ["user", "admin"],
-                    help="Admin: akses penuh | User: hanya insight bisnis")
+                role_ = st.selectbox("Role", ["user", "admin"])
             add_u = st.form_submit_button("Tambah User", type="primary")
         if add_u:
             ok, msg = db_register(nu, np_, role_)
@@ -1586,89 +1650,54 @@ def page_strategi(
             "💰 Analisis Harga",
         ])
 
-    # ─── TAB: PREDIKSI & STRATEGI ───
+    # ─── TAB 0: PREDIKSI & STRATEGI ───
     with tabs[0]:
         section_header("Filter Periode Historis", "🗓️")
         ds, de = period_filter(clean_occ, "strat")
         clean_occ_f = filter_occ(clean_occ, ds, de)
         st.divider()
 
-        # CEK: Apakah ada model yang tersedia?
         if not sarima_models:
             st.warning("⚠️ **Model Prediksi Belum Tersedia**")
-
             col1, col2 = st.columns([1, 1])
-
             with col1:
                 if is_admin:
                     st.markdown("""
                     ### 🔧 Panduan untuk Admin
-
-                    **Langkah-langkah melatih model:**
-
-                    1. ✅ **Upload Data Okupansi**
-                       Buka menu **📂 Manajemen Data** → tab **📤 Upload Data**
-
-                    2. ✅ **Latih Model SARIMA**
-                       Buka tab **🚀 Train Model** (tab paling kanan di halaman ini)
-
+                    1. ✅ **Upload Data Okupansi** → menu **📂 Manajemen Data**
+                    2. ✅ **Latih Model SARIMA** → tab **🚀 Train Model**
                     3. ✅ **Pilih Vila & Mulai Training**
-                       Centang vila yang ingin dilatih → Klik **🚀 Mulai Training**
-
                     4. ✅ **Refresh Halaman**
-                       Setelah training selesai, refresh untuk melihat prediksi
                     """)
                 else:
-                    st.info("""
-                    💡 **Untuk melihat prediksi hunian:**
-
-                    Hubungi administrator untuk melatih model prediksi SARIMA.
-
-                    Administrator perlu:
-                    - Upload data okupansi historis
-                    - Melatih model untuk setiap vila
-                    """)
-
+                    st.info("💡 Hubungi administrator untuk melatih model prediksi SARIMA.")
             with col2:
                 st.markdown("### 📊 Status Vila Saat Ini")
-
                 for villa in selected_villas:
-                    has_data = villa in clean_occ
+                    has_data  = villa in clean_occ
                     has_model = db_model_exists(villa)
                     villa_name = villa.replace("_villas", "").title()
-
                     if has_data and has_model:
-                        status = "✅ Siap (Data + Model)"
-                        color_bg = "#DCFCE7"
+                        status, color_bg = "✅ Siap (Data + Model)", "#DCFCE7"
                     elif has_data and not has_model:
-                        status = "⚠️ Perlu Training"
-                        color_bg = "#FEF9C3"
+                        status, color_bg = "⚠️ Perlu Training", "#FEF9C3"
                     elif not has_data and has_model:
-                        status = "⚠️ Data Hilang"
-                        color_bg = "#FEE2E2"
+                        status, color_bg = "⚠️ Data Hilang", "#FEE2E2"
                     else:
-                        status = "❌ Belum Ada Data"
-                        color_bg = "#FEE2E2"
-
+                        status, color_bg = "❌ Belum Ada Data", "#FEE2E2"
                     st.markdown(f"""
                     <div style="background:{color_bg};border-radius:8px;padding:8px 12px;margin-bottom:6px;">
                         <strong>{villa_name}</strong><br>
                         <span style="font-size:12px;">{status}</span>
                     </div>
                     """, unsafe_allow_html=True)
-
-                # Ringkasan
                 n_ready = sum(1 for v in selected_villas if v in sarima_models)
-                n_total = len(selected_villas)
                 st.divider()
-                st.metric("Model Siap", f"{n_ready}/{n_total} vila")
-
-        # JIKA MODEL TERSEDIA - tampilkan prediksi
+                st.metric("Model Siap", f"{n_ready}/{len(selected_villas)} vila")
         else:
             section_header(f"Prediksi Hunian +{FORECAST_STEPS} Bulan ke Depan", "🔭")
             n_cols_sum = min(len(selected_villas), 4)
             sum_cols   = st.columns(n_cols_sum)
-
             for i, villa in enumerate([v for v in selected_villas if v in sarima_models]):
                 info = sarima_models[villa]
                 fore = fore_info_all.get(villa, {})
@@ -1687,62 +1716,46 @@ def page_strategi(
                     """, unsafe_allow_html=True)
 
             st.markdown("<br>", unsafe_allow_html=True)
-
-            # ─── GRAFIK FORECAST PER VILA (BAGIAN YANG HILANG) ───
             section_header("Grafik Forecast per Vila", "📈")
-
             for villa in selected_villas:
                 if villa not in sarima_models:
                     continue
-
                 info = sarima_models[villa]
                 fore = fore_info_all.get(villa)
-
                 if not fore:
                     continue
-
-                # Tampilkan grafik forecast
-                fig_forecast = chart_forecast(info, fore)
-                st.plotly_chart(fig_forecast, use_container_width=True)
-
-                # Tabel prediksi detail
+                st.plotly_chart(chart_forecast(info, fore), use_container_width=True)
                 with st.expander(f"📊 Detail Prediksi {info['title']}", expanded=False):
                     forecast_df = pd.DataFrame({
-                        "Bulan": fore["fore_mean"].index.strftime("%b %Y"),
-                        "Prediksi (%)": fore["fore_mean"].values.round(1),
-                        "Lower Bound (%)": fore["fore_ci"].iloc[:, 0].values.round(1),
-                        "Upper Bound (%)": fore["fore_ci"].iloc[:, 1].values.round(1),
+                        "Bulan":             fore["fore_mean"].index.strftime("%b %Y"),
+                        "Prediksi (%)":      fore["fore_mean"].values.round(1),
+                        "Lower Bound (%)":   fore["fore_ci"].iloc[:, 0].values.round(1),
+                        "Upper Bound (%)":   fore["fore_ci"].iloc[:, 1].values.round(1),
                     })
-
                     col1, col2 = st.columns([2, 1])
-
                     with col1:
                         st.dataframe(forecast_df, use_container_width=True, hide_index=True)
-
                     with col2:
                         st.metric("Rata-rata Prediksi", f"{fore['fore_mean'].mean():.1f}%")
                         st.metric("Std Deviasi", f"{fore['fore_mean'].std():.1f}%")
-                        if fore['is_flat']:
-                            st.warning("⚠️ Prediksi flat - model tidak menangkap pola musiman")
+                        if fore["is_flat"]:
+                            st.warning("⚠️ Prediksi flat — model tidak menangkap pola musiman")
                         else:
                             st.success("✅ Model menangkap variasi musiman")
-
             st.divider()
 
-    # ─── Fungsi render tab Analisis Harga (dipakai di 2 tempat) ───
+    # ─── Fungsi render tab Analisis Harga ───
     def render_harga_tab():
         section_header("Keterkaitan Okupansi & Revenue (ADR)", "💰")
         if not clean_fin:
-            st.info("📂 Data finansial belum diupload. Upload file revenue di **Manajemen Data**.")
+            st.info("📂 Data finansial belum diupload.")
             return
         fig_sc = chart_scatter_occ_rev(clean_occ, clean_fin, villa_cfg)
         if fig_sc:
             st.plotly_chart(fig_sc, use_container_width=True)
-            st.caption(
-                "**Interpretasi:** Nilai **r mendekati +1** = hubungan positif kuat antara hunian & revenue. "
-                "**p < 0.05** = hubungan signifikan secara statistik.")
+            st.caption("**r mendekati +1** = hubungan positif kuat. **p < 0.05** = signifikan.")
         else:
-            st.info("Data tidak cukup untuk menampilkan scatter plot.")
+            st.info("Data tidak cukup untuk scatter plot.")
         section_header("Statistik Revenue Historis", "📋")
         fin_rows = []
         for villa, rev in clean_fin.items():
@@ -1759,7 +1772,7 @@ def page_strategi(
             })
         if fin_rows:
             st.dataframe(pd.DataFrame(fin_rows), use_container_width=True, hide_index=True)
-        section_header("Tren Revenue Bulanan (ADR Proxy)", "📈")
+        section_header("Tren Revenue Bulanan", "📈")
         fig_rev = go.Figure()
         for villa, rev in clean_fin.items():
             if villa not in selected_villas:
@@ -1784,7 +1797,7 @@ def page_strategi(
         with tabs[1]:
             render_harga_tab()
 
-    # ─── TAB: EDA (Admin only) ───
+    # ─── TAB 1: EDA (Admin only) ───
     if is_admin:
         with tabs[1]:
             section_header("Exploratory Data Analysis — Time Series Bulanan", "🔬")
@@ -1845,12 +1858,11 @@ def page_strategi(
                 st.plotly_chart(fig_e, use_container_width=True)
             render_harga_tab()
 
-        # ─── TAB: ANALISIS PER VILA (Admin only) ───
+        # ─── TAB 2: ANALISIS PER VILA (Admin only) ───
         with tabs[2]:
             section_header("Analisis Mendalam per Vila", "🏡")
             st.markdown(
-                "Setiap vila menampilkan 4 sub-analisis: "
-                "**Dekomposisi → ADF & Siklus → ACF/PACF → Hasil Model**.")
+                "Setiap vila: **Dekomposisi → ADF & Siklus → ACF/PACF → Hasil Model**.")
             st.divider()
             for villa in selected_villas:
                 if villa not in clean_occ:
@@ -1878,7 +1890,7 @@ def page_strategi(
                     c3.metric("d (differencing)",   str(d_val))
                     c4.metric("m (seasonality)",    str(m_val))
                     if info:
-                        c5.metric("RMSE Model", f"{info.get('rmse', 0):.1f}%")
+                        c5.metric("RMSE (Test Set)", f"{info.get('rmse', 0):.1f}%")
                     st.divider()
                     t1, t2, t3, t4 = st.tabs([
                         "📈 Dekomposisi", "🔬 ADF & Siklus", "📉 ACF/PACF", "🤖 Hasil Model"
@@ -1907,19 +1919,19 @@ def page_strategi(
                                     "✅ Rendah" if r_str < 30 else "⚠️ Tinggi")
                                 parts = []
                                 if slope > 0.05:
-                                    parts.append(f"Tren **naik** ({slope:+.2f}%/bln) — hunian cenderung meningkat.")
+                                    parts.append(f"Tren **naik** ({slope:+.2f}%/bln).")
                                 elif slope < -0.05:
-                                    parts.append(f"Tren **turun** ({slope:+.2f}%/bln) — perlu strategi untuk menahan penurunan.")
+                                    parts.append(f"Tren **turun** ({slope:+.2f}%/bln) — perlu strategi.")
                                 else:
-                                    parts.append("Tren **stabil** tanpa perubahan signifikan.")
+                                    parts.append("Tren **stabil**.")
                                 if s_str > 20:
-                                    parts.append(f"Pola musiman **kuat** ({s_str:.1f}%) — siklus m={m_val} bln terkonfirmasi.")
+                                    parts.append(f"Pola musiman **kuat** ({s_str:.1f}%) — siklus m={m_val} bln.")
                                 else:
-                                    parts.append(f"Pola musiman **lemah** ({s_str:.1f}%) — SARIMA mungkin kurang presisi.")
+                                    parts.append(f"Pola musiman **lemah** ({s_str:.1f}%).")
                                 if r_str < 30:
-                                    parts.append(f"Noise rendah ({r_str:.1f}%) — model menjelaskan sebagian besar variasi.")
+                                    parts.append(f"Noise rendah ({r_str:.1f}%).")
                                 else:
-                                    parts.append(f"Noise tinggi ({r_str:.1f}%) — ada faktor eksternal yang belum tertangkap.")
+                                    parts.append(f"Noise tinggi ({r_str:.1f}%) — ada faktor eksternal.")
                                 st.info("💡 " + "  \n".join(parts))
                             except Exception:
                                 pass
@@ -1936,9 +1948,9 @@ def page_strategi(
                                 *[{"Parameter": f"CV {k}", "Nilai": str(v)} for k, v in res0["critical"].items()],
                             ]), use_container_width=True, hide_index=True)
                             if res0["stationary"]:
-                                st.success(f"✅ Data sudah stasioner (p={res0['pvalue']:.3f}). d=0.")
+                                st.success(f"✅ Data stasioner (p={res0['pvalue']:.3f}). d=0.")
                             else:
-                                st.info(f"📌 Belum stasioner (p={res0['pvalue']:.3f}) → 1× differencing → d={d_val}.")
+                                st.info(f"📌 Belum stasioner (p={res0['pvalue']:.3f}) → d={d_val}.")
                         with ca2:
                             st.markdown("#### Deteksi Periode Musiman (Periodogram)")
                             freqs, power = scipy_periodogram(monthly.values)
@@ -1976,7 +1988,7 @@ def page_strategi(
                             if sig_acf:
                                 st.write(", ".join([f"`{l}`" for l in sig_acf[:12]]))
                                 if any(l % m_val == 0 for l in sig_acf[:18]):
-                                    st.success(f"✅ Lag kelipatan {m_val} signifikan → pola musiman terkonfirmasi")
+                                    st.success(f"✅ Lag kelipatan {m_val} signifikan → pola musiman")
                             else:
                                 st.info("Tidak ada lag signifikan")
                         with c_p:
@@ -1985,27 +1997,27 @@ def page_strategi(
                                 st.write(", ".join([f"`{l}`" for l in sig_pacf[:12]]))
                             else:
                                 st.info("Tidak ada lag signifikan")
-                        st.caption(f"Threshold: ±{conf:.3f} | ACF truncate tajam → MA(q) | PACF truncate tajam → AR(p)")
+                        st.caption(f"Threshold: ±{conf:.3f}")
                     with t4:
                         if not info:
-                            st.info("⏳ Model belum dilatih. Gunakan tab **Train Model**.")
+                            st.info("⏳ Model belum dilatih.")
                         else:
                             p, d_o, q    = info["order"]
                             P, D, Q, ms  = info["seasonal_order"]
                             cm1, cm2, cm3, cm4 = st.columns(4)
-                            cm1.metric("Order",    f"({p},{d_o},{q})")
-                            cm2.metric("Seasonal", f"({P},{D},{Q})[{ms}]")
-                            cm3.metric("AIC",      f"{info['model'].aic:.1f}")
-                            cm4.metric("RMSE",     f"{info.get('rmse', 0):.2f}%")
+                            cm1.metric("Order",          f"({p},{d_o},{q})")
+                            cm2.metric("Seasonal",       f"({P},{D},{Q})[{ms}]")
+                            cm3.metric("AIC (full)",     f"{info['model'].aic:.1f}")
+                            cm4.metric("RMSE (Test Set)", f"{info.get('rmse', 0):.2f}%")
                             st.plotly_chart(chart_model_fit(info), use_container_width=True)
                             st.plotly_chart(chart_residual(info), use_container_width=True)
-                            st.markdown("**Interpretasi Model untuk Bisnis:**")
+                            st.markdown("**Interpretasi Model:**")
                             pts = []
-                            if p  > 0: pts.append(f"**AR({p})**: Hunian dipengaruhi **{p} bulan sebelumnya**")
-                            if d_o > 0: pts.append(f"**I({d_o})**: Data di-differencing agar stasioner")
-                            if q  > 0: pts.append(f"**MA({q})**: Koreksi dari {q} error prediksi sebelumnya")
+                            if p  > 0: pts.append(f"**AR({p})**: Hunian dipengaruhi {p} bulan sebelumnya")
+                            if d_o > 0: pts.append(f"**I({d_o})**: Data di-differencing (stasioner)")
+                            if q  > 0: pts.append(f"**MA({q})**: Koreksi {q} error prediksi sebelumnya")
                             if P > 0 or Q > 0:
-                                pts.append(f"**Seasonal ({P},{D},{Q})[{ms}]**: Pola musiman tiap {ms} bulan ditangkap")
+                                pts.append(f"**Seasonal ({P},{D},{Q})[{ms}]**: Pola musiman tiap {ms} bulan")
                             for pt in pts:
                                 st.markdown(f"- {pt}")
                             mape_v = info.get("mape", float("nan"))
@@ -2018,204 +2030,97 @@ def page_strategi(
                             else:
                                 st.error(f"{mq_i} Pertimbangkan retrain atau tambah data historis.")
 
-        # ─── TAB: TRAIN MODEL (Admin only) ───
-        # with tabs[3]:
-        #     section_header("Training Model SARIMA", "🚀")
-        #     st.markdown(
-        #         "Model dilatih menggunakan **Auto ARIMA** untuk menemukan order `(p,d,q)(P,D,Q)[m]` "
-        #         "terbaik berdasarkan AIC. Evaluasi menggunakan **RMSE** dan **MAPE**.")
-        #     avail_tr = [v for v in villa_cfg if v in clean_occ]
-        #     if not avail_tr:
-        #         st.warning("Tidak ada vila dengan data. Upload data terlebih dahulu.")
-        #         return
-        #     section_header("Status Model per Vila", "📋")
-        #     status_rows = []
-        #     for v in avail_tr:
-        #         mi = db_load_model(v)
-        #         status_rows.append({
-        #             "Vila":     v.replace("_villas", "").title(),
-        #             "Data":     f"{len(clean_occ[v].resample('MS').mean().dropna())} bln",
-        #             "d":        villa_d.get(v, "—"),
-        #             "m":        villa_m.get(v, "—"),
-        #             "Model":    "✅" if db_model_exists(v) else "❌ Belum ada",
-        #             "Dilatih":  db_model_trained_at(v),
-        #             "RMSE (%)": round(mi.get("rmse", 0), 2) if mi else "—",
-        #             "MAPE (%)": round(mi.get("mape", 0), 2) if mi else "—",
-        #         })
-        #     st.dataframe(pd.DataFrame(status_rows), use_container_width=True, hide_index=True)
-        #     st.divider()
-        #     c_sel, c_opt = st.columns([3, 1])
-        #     with c_sel:
-        #         train_sel = st.multiselect(
-        #             "Pilih Vila untuk Dilatih", avail_tr, default=avail_tr,
-        #             format_func=lambda v: (
-        #                 f"{v.replace('_villas','').title()} "
-        #                 f"{'✅' if db_model_exists(v) else '⚠️ belum terlatih'}"
-        #             ),
-        #         )
-        #     with c_opt:
-        #         force = st.checkbox("Force Retrain", value=False,
-        #             help="Centang untuk melatih ulang vila yang sudah punya model")
-        #     if st.button("🚀 Mulai Training", type="primary", use_container_width=True):
-        #         to_train = [v for v in train_sel if force or not db_model_exists(v)]
-        #         skipped  = [v for v in train_sel if not force and db_model_exists(v)]
-        #         if skipped:
-        #             st.info(f"⏭️ Dilewati (sudah ada model): "
-        #                     f"{', '.join(v.replace('_villas','').title() for v in skipped)}")
-        #         if not to_train:
-        #             st.warning("Tidak ada vila yang perlu dilatih. Centang **Force Retrain** untuk retrain.")
-        #         else:
-        #             pb       = st.progress(0)
-        #             status_t = st.empty()
-        #             results  = []
-        #             for i, villa in enumerate(to_train):
-        #                 t_v = villa.replace("_villas", "").title()
-        #                 status_t.text(f"⚙️ Training {t_v} ({i+1}/{len(to_train)})...")
-        #                 pb.progress(i / len(to_train))
-        #                 try:
-        #                     info_tr = train_sarima(
-        #                         clean_occ[villa],
-        #                         villa_d.get(villa, 1),
-        #                         villa_m.get(villa, 12),
-        #                         villa_cfg.get(villa, {}).get("color", "#2563EB"),
-        #                         t_v,
-        #                     )
-        #                     db_save_model(villa, info_tr)
-        #                     log_model(
-        #                         st.session_state.user["username"], villa,
-        #                         f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
-        #                         info_tr["model"].aic,
-        #                         info_tr.get("rmse", 0),
-        #                         info_tr.get("mape", 0),
-        #                     )
-        #                     st.session_state.setdefault("sarima_cache", {})[villa] = info_tr
-        #                     results.append({
-        #                         "Vila":     t_v,
-        #                         "Order":    f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
-        #                         "AIC":      round(info_tr["model"].aic, 2),
-        #                         "RMSE (%)": round(info_tr.get("rmse", 0), 2),
-        #                         "MAPE (%)": round(info_tr.get("mape", 0), 2),
-        #                         "Status":   "✅ Berhasil",
-        #                     })
-        #                 except Exception as e:
-        #                     results.append({"Vila": t_v, "Status": f"❌ {str(e)[:80]}"})
-        #             pb.progress(1.0)
-        #             status_t.text("✅ Training selesai!")
-        #             success_count = len([r for r in results if "✅" in r.get("Status", "")])
-        #             st.success(f"Berhasil melatih **{success_count}** dari {len(to_train)} vila.")
-        #             st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-        #             st.info("🔄 Refresh halaman untuk melihat hasil forecast terbaru.")
-        #     with st.expander("📋 Log Training"):
-        #         logs_m = get_model_log()
-        #         if logs_m:
-        #             st.dataframe(pd.DataFrame(logs_m), use_container_width=True, hide_index=True)
-          # ─── TAB: TRAIN MODEL (Admin only) ───
+        # ─── TAB 3: TRAIN MODEL (Admin only) ───
         with tabs[3]:
             section_header("Training Model SARIMA", "🚀")
             st.markdown(
-                "Model dilatih menggunakan **Auto ARIMA** untuk menemukan order `(p,d,q)(P,D,Q)[m]` "
-                "terbaik berdasarkan AIC. Evaluasi menggunakan **RMSE** dan **MAPE**.")
+                "Model dilatih menggunakan **Auto ARIMA + Grid Search SARIMAX** "
+                "untuk order `(p,d,q)(P,D,Q)[m]` terbaik berdasarkan AIC. "
+                "Evaluasi: **RMSE & SMAPE** pada **test set 20%** — identik notebook Cell 9.")
             avail_tr = [v for v in villa_cfg if v in clean_occ]
             if not avail_tr:
                 st.warning("Tidak ada vila dengan data. Upload data terlebih dahulu.")
                 return
+
             section_header("Status Model per Vila", "📋")
             status_rows = []
             for v in avail_tr:
                 mi = db_load_model(v)
                 status_rows.append({
-                    "Vila":     v.replace("_villas", "").title(),
-                    "Data":     f"{len(clean_occ[v].resample('MS').mean().dropna())} bln",
-                    "d":        villa_d.get(v, "—"),
-                    "m":        villa_m.get(v, "—"),
-                    "Model":    "✅" if db_model_exists(v) else "❌ Belum ada",
-                    "Dilatih":  db_model_trained_at(v),
-                    "RMSE (%)": round(mi.get("rmse", 0), 2) if mi else "—",
-                    "MAPE (%)": round(mi.get("mape", 0), 2) if mi else "—",
+                    "Vila":      v.replace("_villas", "").title(),
+                    "Data":      f"{len(clean_occ[v].resample('MS').mean().dropna())} bln",
+                    "d":         villa_d.get(v, "—"),
+                    "m":         villa_m.get(v, "—"),
+                    "Model":     "✅" if db_model_exists(v) else "❌ Belum ada",
+                    "Dilatih":   db_model_trained_at(v),
+                    "RMSE (%)":  round(mi.get("rmse", 0), 2) if mi else "—",
+                    "SMAPE (%)": round(mi.get("mape", 0), 2) if mi else "—",
                 })
             st.dataframe(pd.DataFrame(status_rows), use_container_width=True, hide_index=True)
 
-            with st.expander("ℹ️ Cara Perhitungan RMSE & MAPE — Contoh Data Aktual", expanded=False):
+            # ── Expander: penjelasan RMSE & SMAPE dengan contoh data aktual ──
+            with st.expander("ℹ️ Cara Perhitungan RMSE & SMAPE — Contoh Data Aktual", expanded=False):
                 example_villa = next(
                     (v for v in avail_tr if v in sarima_models), None
                 )
                 if example_villa is None:
-                    st.info("Belum ada model terlatih. Latih model terlebih dahulu untuk melihat contoh perhitungan.")
+                    st.info("Belum ada model terlatih. Latih model untuk melihat contoh.")
                 else:
-                    info_ex   = sarima_models[example_villa]
-                    test_ex   = info_ex["test"]
-                    pred_ex   = info_ex["pred_mean"]
-                    title_ex  = example_villa.replace("_villas", "").title()
+                    info_ex  = sarima_models[example_villa]
+                    test_ex  = info_ex["test"]
+                    pred_ex  = info_ex["pred_mean"]
+                    title_ex = example_villa.replace("_villas", "").title()
+                    n_total  = len(info_ex["monthly"])
 
-                    # Sejajarkan index test aktual dan prediksi test
-                    common_ex  = test_ex.index.intersection(pred_ex.index)
-                    n_total    = len(info_ex["monthly"])
-
-                    # Jika test kosong (model di-load dari DB), fallback ke monthly vs fitted
+                    common_ex = test_ex.index.intersection(pred_ex.index)
                     if len(common_ex) == 0:
-                        monthly_ex = info_ex["monthly"]
-                        common_ex  = monthly_ex.index.intersection(pred_ex.index)
-                        act_vals   = monthly_ex.loc[common_ex].values
-                        pred_vals  = pred_ex.loc[common_ex].values
-                        n_pts      = len(common_ex)
-                        period_label = "in-sample (model di-load dari DB)"
+                        st.info("Tidak ada data evaluasi test set. Latih ulang untuk melihat perhitungan.")
                     else:
-                        act_vals   = test_ex.loc[common_ex].values
-                        pred_vals  = pred_ex.loc[common_ex].values
-                        n_pts      = len(common_ex)
-                        period_label = f"test set 20% ({n_pts} bulan)"
+                        act_vals  = test_ex.loc[common_ex].values
+                        pred_vals = pred_ex.loc[common_ex].values
+                        n_pts     = len(common_ex)
 
-                    if len(common_ex) == 0:
-                        st.info("Tidak ada data evaluasi tersedia. Latih ulang model untuk melihat perhitungan.")
-                    else:
-                        st.markdown(f"##### 📌 Contoh: **{title_ex}** ({n_total} bulan data)")
+                        st.markdown(f"##### 📌 Contoh: **{title_ex}** ({n_total} bulan total)")
                         st.markdown(f"""
-                        RMSE & MAPE dihitung dari **{period_label}**,
-                        identik dengan notebook Cell 11 — model dilatih pada 80% data awal dan dievaluasi pada sisa data.
+                        RMSE & SMAPE dihitung dari **test set 20% ({n_pts} bulan)**,
+                        identik notebook Cell 9 — model_train dilatih pada 80% data awal.
                         - 📅 **Periode:** {common_ex[0].strftime('%b %Y')} – {common_ex[-1].strftime('%b %Y')}
                         - **n =** {n_pts} bulan
                         """)
-
                         st.divider()
 
-                        err      = act_vals - pred_vals
-                        err_sq   = err ** 2
-                        abs_pct  = np.where(
-                            np.abs(act_vals) > 5,
-                            np.abs(err / act_vals) * 100,
-                            np.nan
-                        )
+                        err     = act_vals - pred_vals
+                        err_sq  = err ** 2
+                        # SMAPE identik notebook
+                        denom_s = (np.abs(act_vals) + np.abs(pred_vals)) / 2.0
+                        denom_s = np.where(denom_s == 0, 1.0, denom_s)
+                        smape_each = np.abs(err) / denom_s * 100
 
                         df_calc = pd.DataFrame({
-                            "Bulan":             common_ex.strftime("%b %Y"),
-                            "Aktual (%)":        [f"{v:.2f}" for v in act_vals],
-                            "Fitted (%)":        [f"{v:.2f}" for v in pred_vals],
-                            "Error (y−ŷ)":       [f"{v:.2f}" for v in err],
-                            "Error² (y−ŷ)²":     [f"{v:.4f}" for v in err_sq],
-                            "|Error/y| × 100%":  ["—" if np.isnan(v) else f"{v:.2f}" for v in abs_pct],
+                            "Bulan":           common_ex.strftime("%b %Y"),
+                            "Aktual (%)":      [f"{v:.2f}" for v in act_vals],
+                            "Prediksi (%)":    [f"{v:.2f}" for v in pred_vals],
+                            "Error (y−ŷ)":     [f"{v:.2f}" for v in err],
+                            "Error² (y−ŷ)²":   [f"{v:.4f}" for v in err_sq],
+                            "SMAPE_i (%)":     [f"{v:.2f}" for v in smape_each],
                         })
-
                         mse_val   = np.mean(err_sq)
                         rmse_val  = np.sqrt(mse_val)
-                        mask_mape = np.abs(act_vals) > 5
-                        mape_val  = np.mean(abs_pct[mask_mape]) if mask_mape.sum() > 0 else np.nan
+                        smape_val = np.mean(smape_each)
 
                         total_row = pd.DataFrame([{
-                            "Bulan":             "HASIL",
-                            "Aktual (%)":        "—",
-                            "Fitted (%)":        "—",
-                            "Error (y−ŷ)":       "—",
-                            "Error² (y−ŷ)²":     f"Mean = {mse_val:.4f}",
-                            "|Error/y| × 100%":  f"Mean = {np.nanmean(abs_pct):.2f}%",
+                            "Bulan":         "HASIL",
+                            "Aktual (%)":    "—",
+                            "Prediksi (%)":  "—",
+                            "Error (y−ŷ)":   "—",
+                            "Error² (y−ŷ)²": f"Mean = {mse_val:.4f}",
+                            "SMAPE_i (%)":   f"Mean = {smape_val:.2f}%",
                         }])
-
                         st.dataframe(
                             pd.concat([df_calc, total_row], ignore_index=True),
                             use_container_width=True, hide_index=True
                         )
-
                         st.divider()
-
                         col_r, col_m = st.columns(2)
                         with col_r:
                             st.markdown("**RMSE**")
@@ -2226,20 +2131,16 @@ def page_strategi(
                             )
                             st.success(f"✅ RMSE = **{rmse_val:.4f}%**")
                         with col_m:
-                            st.markdown("**MAPE**")
-                            st.latex(r"\text{MAPE} = \frac{1}{n}\sum\left|\frac{y_i-\hat{y}_i}{y_i}\right|\times100\%")
-                            valid_count = int(mask_mape.sum())
-                            mape_str = f"{mape_val:.4f}%" if not np.isnan(mape_val) else "—"
+                            st.markdown("**SMAPE** (Symmetric MAPE — identik notebook)")
                             st.latex(
-                                rf"\text{{MAPE}} = \frac{{1}}{{{valid_count}}}"
-                                rf"\times {np.nansum(abs_pct):.4f} = \mathbf{{{mape_str}}}"
+                                r"\text{SMAPE} = \frac{1}{n}\sum"
+                                r"\frac{|y_i-\hat{y}_i|}{(|y_i|+|\hat{y}_i|)/2}\times100\%"
                             )
-                            st.success(f"✅ MAPE = **{mape_str}**")
-
-                        st.caption(
-                            f"*MAPE dihitung dari {valid_count} bulan dengan aktual > 5% "
-                            f"(dari total {n_pts} bulan)*"
-                        )
+                            st.latex(
+                                rf"\text{{SMAPE}} = \frac{{1}}{{{n_pts}}}"
+                                rf"\times {np.sum(smape_each):.4f} = \mathbf{{{smape_val:.4f}\%}}"
+                            )
+                            st.success(f"✅ SMAPE = **{smape_val:.4f}%**")
 
             st.divider()
             c_sel, c_opt = st.columns([3, 1])
@@ -2258,10 +2159,9 @@ def page_strategi(
                 to_train = [v for v in train_sel if force or not db_model_exists(v)]
                 skipped  = [v for v in train_sel if not force and db_model_exists(v)]
                 if skipped:
-                    st.info(f"⏭️ Dilewati (sudah ada model): "
-                            f"{', '.join(v.replace('_villas','').title() for v in skipped)}")
+                    st.info(f"⏭️ Dilewati: {', '.join(v.replace('_villas','').title() for v in skipped)}")
                 if not to_train:
-                    st.warning("Tidak ada vila yang perlu dilatih. Centang **Force Retrain** untuk retrain.")
+                    st.warning("Tidak ada vila yang perlu dilatih. Centang **Force Retrain**.")
                 else:
                     pb       = st.progress(0)
                     status_t = st.empty()
@@ -2274,7 +2174,7 @@ def page_strategi(
                             info_tr = train_sarima(
                                 clean_occ[villa],
                                 villa_d.get(villa, 1),
-                                villa_m.get(villa, 12),
+                                villa_m.get(villa, FALLBACK_M),
                                 villa_cfg.get(villa, {}).get("color", "#2563EB"),
                                 t_v,
                             )
@@ -2288,12 +2188,12 @@ def page_strategi(
                             )
                             st.session_state.setdefault("sarima_cache", {})[villa] = info_tr
                             results.append({
-                                "Vila":     t_v,
-                                "Order":    f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
-                                "AIC":      round(info_tr["model"].aic, 2),
-                                "RMSE (%)": round(info_tr.get("rmse", 0), 2),
-                                "MAPE (%)": round(info_tr.get("mape", 0), 2),
-                                "Status":   "✅ Berhasil",
+                                "Vila":      t_v,
+                                "Order":     f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
+                                "AIC":       round(info_tr["model"].aic, 2),
+                                "RMSE (%)":  round(info_tr.get("rmse", 0), 2),
+                                "SMAPE (%)": round(info_tr.get("smape", 0), 2),
+                                "Status":    "✅ Berhasil",
                             })
                         except Exception as e:
                             results.append({"Vila": t_v, "Status": f"❌ {str(e)[:80]}"})
@@ -2303,10 +2203,13 @@ def page_strategi(
                     st.success(f"Berhasil melatih **{success_count}** dari {len(to_train)} vila.")
                     st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
                     st.info("🔄 Refresh halaman untuk melihat hasil forecast terbaru.")
+
             with st.expander("📋 Log Training"):
                 logs_m = get_model_log()
                 if logs_m:
                     st.dataframe(pd.DataFrame(logs_m), use_container_width=True, hide_index=True)
+
+
 # ══════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════
@@ -2362,23 +2265,20 @@ def main():
     is_admin  = st.session_state.user.get("role") == "admin"
     username  = st.session_state.user.get("username", "")
 
-        # ==================== SIDEBAR ====================
+    # ── SIDEBAR ──
     with st.sidebar:
         st.markdown(
             f"<div style='text-align:center;padding:12px 0 8px;'>"
             f"<img src='{LOGO_URL}' style='height:60px;object-fit:contain;'></div>",
             unsafe_allow_html=True)
-
         role_color = "#DC2626" if is_admin else "#2563EB"
         role_label = "Admin" if is_admin else "User"
-
         st.markdown(
             f"<div style='text-align:center;padding:4px 0 12px;'>"
             f"<span style='font-size:13px;color:#374151;'>{username}</span>&nbsp;"
             f"<span style='background:{role_color};color:white;font-size:11px;"
             f"font-weight:600;padding:2px 8px;border-radius:12px;'>{role_label}</span>"
             f"</div>", unsafe_allow_html=True)
-
         st.divider()
 
         if is_admin:
@@ -2399,14 +2299,12 @@ def main():
                 "<div style='font-size:12px;font-weight:600;color:#374151;"
                 "text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;'>Filter Vila</div>",
                 unsafe_allow_html=True)
-
             selected_villas = st.multiselect(
                 "Filter Vila",
                 options=list(villa_cfg.keys()),
                 default=list(villa_cfg.keys()),
                 format_func=lambda v: f"{v.replace('_villas','').title()} · {villa_cfg[v]['area'].title()}",
                 label_visibility="collapsed")
-
             if not selected_villas:
                 st.warning("Pilih minimal 1 vila.")
                 selected_villas = list(villa_cfg.keys())
@@ -2414,19 +2312,17 @@ def main():
             selected_villas = list(villa_cfg.keys())
 
         st.divider()
-
         if st.button("🚪 Logout", use_container_width=True):
             session_logout()
             st.session_state.logged_in = False
             st.session_state.user = {}
             st.rerun()
-
         st.markdown(
             "<div style='font-size:10px;color:#9CA3AF;text-align:center;padding-top:8px;'>"
             "SARIMA Forecasting System<br>PT Bali Cipta Vila Mandiri<br>© 2025</div>",
             unsafe_allow_html=True)
 
-    # ==================== MAIN LOGIC ====================
+    # ── MAIN LOGIC ──
     if nav == "📂 Manajemen Data":
         if not is_admin:
             st.error("🔒 Akses ditolak. Halaman ini hanya untuk Admin.")
@@ -2453,14 +2349,16 @@ def main():
         villa_d, _ = run_adf_all(clean_occ, villa_cfg)
         villa_m, _ = run_detect_m_all(clean_occ, villa_cfg)
 
-    # ==================== SARIMA Models ====================
+    # ── SARIMA Models ──
     sarima_models: dict = {}
     cache = st.session_state.get("sarima_cache", {})
 
+    # Prioritas 1: ambil dari session cache (hasil training di sesi ini)
     for villa in selected_villas:
         if villa in cache and villa in clean_occ:
             sarima_models[villa] = cache[villa]
 
+    # Prioritas 2: load dari DB — FIX-3: pakai split 80/20 identik notebook Cell 9
     for villa in [v for v in selected_villas if v not in sarima_models and v in clean_occ]:
         mi = db_load_model(villa)
         if not mi:
@@ -2469,39 +2367,61 @@ def main():
             monthly = clean_occ[villa].resample("MS").mean().dropna()
             order   = mi.get("order", (1, 1, 1))
             s_order = mi.get("seasonal_order", (0, 0, 0, 0))
+            d_val   = mi.get("d", villa_d.get(villa, 1))
+            m_val   = mi.get("m", villa_m.get(villa, FALLBACK_M))
+            color_  = villa_cfg.get(villa, {}).get("color", "#2563EB")
+            title_  = villa.replace("_villas", "").title()
 
-            model_full = SARIMAX(
-                monthly,
-                order=order,
-                seasonal_order=s_order,
-                enforce_stationarity=False,
-                enforce_invertibility=False
+            # ── Split 80/20 identik notebook Cell 9
+            n_test_    = max(int(len(monthly) * 0.20), 3)
+            split_idx_ = len(monthly) - n_test_
+            train_, test_ = monthly.iloc[:split_idx_], monthly.iloc[split_idx_:]
+
+            # ── model_train (80%) → pred_mean & metrik pada TEST SET
+            model_train_ = SARIMAX(
+                train_, order=order, seasonal_order=s_order,
+                enforce_stationarity=False, enforce_invertibility=False,
             ).fit(disp=False)
 
-            # Fitted values dari full data (tanpa split) — konsisten dengan notebook
-            fitted_ = model_full.fittedvalues.clip(0, 100)
-            common_ = monthly.index.intersection(fitted_.index)
-            actual_ = monthly.loc[common_]
-            fitted_ = fitted_.loc[common_]
-            pc_     = model_full.get_prediction().conf_int(alpha=0.10)
-            pc_     = pc_.loc[common_].clip(0, 100)
+            pred_obj_  = model_train_.get_forecast(steps=len(test_))
+            pred_mean_ = pred_obj_.predicted_mean.clip(0, 100)
+            pred_ci_   = pred_obj_.conf_int(alpha=0.10)
+
+            rmse_ = compute_rmse(test_.values, pred_mean_.values)
+            mape_ = compute_smape(test_.values, pred_mean_.values)
+
+            # ── model_full (100%) → AIC final & forecast masa depan
+            model_full_ = SARIMAX(
+                monthly, order=order, seasonal_order=s_order,
+                enforce_stationarity=False, enforce_invertibility=False,
+            ).fit(disp=False)
+
+            train_fitted_ = model_train_.fittedvalues.clip(0, 100)
 
             sarima_models[villa] = {
                 **mi,
-                "model":          model_full,
-                "train":          monthly,                  # full data
-                "test":           pd.Series(dtype=float),   # kosong
-                "monthly":        monthly,
-                "pred_mean":      fitted_,
-                "pred_ci":        pc_,
-                "rmse":           compute_rmse(actual_.values, fitted_.values),
-                "mape":           compute_mape(actual_.values, fitted_.values),
-                "color":          villa_cfg.get(villa, {}).get("color", "#2563EB"),
-                "title":          villa.replace("_villas", "").title(),
+                "model"         : model_full_,
+                "model_train"   : model_train_,
+                "order"         : order,
+                "seasonal_order": s_order,
+                "train"         : train_,
+                "test"          : test_,
+                "monthly"       : monthly,
+                "pred_mean"     : pred_mean_,    # get_forecast TEST SET — bukan in-sample
+                "pred_ci"       : pred_ci_,
+                "train_fitted"  : train_fitted_,
+                "rmse"          : rmse_,         # RMSE pada test set
+                "mape"          : mape_,         # SMAPE pada test set
+                "smape"         : mape_,
+                "d"             : d_val,
+                "m"             : m_val,
+                "color"         : color_,
+                "title"         : title_,
             }
         except Exception:
             pass
 
+    # ── Forecast ──
     fore_info_all = {}
     for villa, info in sarima_models.items():
         try:
@@ -2515,6 +2435,7 @@ def main():
         villa_cfg, villa_d, villa_m,
         selected_villas,
     )
+
 
 if __name__ == "__main__":
     main()
