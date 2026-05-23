@@ -683,36 +683,32 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
         aic_full = model_full.aic
 
     # ══════════════════════════════════════════════════════
-    # STEP 2 — Split 85/15 untuk evaluasi RMSE & MAPE
-    # (model order sudah fix dari Step 1, hanya evaluasi akurasi)
+    # STEP 2 — RMSE & MAPE dari fitted values (full data)
+    # Konsisten dengan notebook: tidak ada split train/test.
+    # RMSE & MAPE dihitung dari in-sample fitted values.
     # ══════════════════════════════════════════════════════
-    split_idx   = max(int(len(monthly) * 0.85), len(monthly) - 6)
-    train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
+    fitted_vals = model_full.fittedvalues.clip(0, 100)
+    # Sejajarkan index (fitted values bisa lebih pendek karena differencing)
+    common_idx  = monthly.index.intersection(fitted_vals.index)
+    actual_vals = monthly.loc[common_idx]
+    fitted_vals = fitted_vals.loc[common_idx]
 
-    try:
-        model_train = SARIMAX(
-            train,                      # ← train saja untuk prediksi ke test
-            order          = order,
-            seasonal_order = seasonal_order,
-            enforce_stationarity  = False,
-            enforce_invertibility = False,
-        ).fit(disp=False)
-    except Exception:
-        model_train = model_full        # fallback: pakai model full jika train gagal
+    rmse_val = compute_rmse(actual_vals.values, fitted_vals.values)
+    mape_val = compute_mape(actual_vals.values, fitted_vals.values)
 
-    pred_obj  = model_train.get_forecast(steps=len(test))
-    pred_mean = pred_obj.predicted_mean.clip(0, 100)
-    pred_ci   = pred_obj.conf_int(alpha=0.10)
+    # Untuk chart model fit: tampilkan fitted vs actual (full data, tanpa split)
+    pred_ci = model_full.get_prediction().conf_int(alpha=0.10)
+    pred_ci = pred_ci.loc[common_idx].clip(0, 100)
 
-    rmse_val = compute_rmse(test.values, pred_mean.values)
-    mape_val = compute_mape(test.values, pred_mean.values)
+    # train = full monthly, test = kosong (tidak ada split)
+    train = monthly
+    test  = pd.Series(dtype=float)
 
     # ══════════════════════════════════════════════════════
-    # Return — model_full dipakai untuk AIC & forecast
-    #          model_train dipakai untuk RMSE/MAPE display
+    # Return — semua dari full data, konsisten dengan notebook
     # ══════════════════════════════════════════════════════
     return {
-        "model"         : model_full,   # ← model dari full data (untuk AIC & forecast)
+        "model"         : model_full,
         "order"         : order,
         "seasonal_order": seasonal_order,
         "train"         : train,
@@ -721,7 +717,7 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
         "d"             : d,
         "m"             : m,
         "use_seasonal"  : use_seasonal,
-        "pred_mean"     : pred_mean,    # prediksi ke test set (untuk chart model fit)
+        "pred_mean"     : fitted_vals,  # fitted values dari full data
         "pred_ci"       : pred_ci,
         "rmse"          : rmse_val,
         "mape"          : mape_val,
@@ -897,8 +893,10 @@ def chart_acf_pacf(monthly: pd.Series, m: int, color: str, title: str) -> go.Fig
     return fig
 
 def chart_model_fit(info: dict) -> go.Figure:
-    train, test = info["train"], info["test"]
-    pred_mean, pred_ci = info["pred_mean"], info["pred_ci"]
+    # Tanpa split: tampilkan aktual vs fitted values (full data)
+    monthly   = info["monthly"]
+    pred_mean = info["pred_mean"]   # fitted values dari full data
+    pred_ci   = info["pred_ci"]
     color, title = info["color"], info["title"]
     rmse, mape   = info["rmse"], info.get("mape", float("nan"))
     fig = go.Figure()
@@ -907,22 +905,16 @@ def chart_model_fit(info: dict) -> go.Figure:
         y=list(pred_ci.iloc[:, 1].clip(0, 100)) + list(pred_ci.iloc[:, 0].clip(0, 100)),
         fill="toself", fillcolor=hex_rgba(color, 0.12),
         line=dict(color="rgba(0,0,0,0)"), name="CI 90%", hoverinfo="skip"))
-    fig.add_trace(go.Scatter(x=train.index, y=train.values,
-        line=dict(color="#9CA3AF", width=1.5), name="Data Latih",
-        hovertemplate="<b>%{x|%b %Y}</b><br>Latih: %{y:.1f}%<extra></extra>"))
-    fig.add_trace(go.Scatter(x=test.index, y=test.values,
-        line=dict(color="#111827", width=2.2), mode="lines+markers",
-        marker=dict(size=7), name="Aktual (Test)",
+    fig.add_trace(go.Scatter(x=monthly.index, y=monthly.values,
+        line=dict(color="#111827", width=2), mode="lines+markers",
+        marker=dict(size=5), name="Aktual",
         hovertemplate="<b>%{x|%b %Y}</b><br>Aktual: %{y:.1f}%<extra></extra>"))
     mape_label = f"{mape:.1f}%" if not np.isnan(mape) else "—"
     fig.add_trace(go.Scatter(x=pred_mean.index, y=pred_mean.values,
         line=dict(color=color, width=2.2, dash="dash"),
         mode="lines+markers", marker=dict(size=6, symbol="square"),
-        name=f"Prediksi | RMSE={rmse:.1f}% | MAPE={mape_label}",
-        hovertemplate="<b>%{x|%b %Y}</b><br>Prediksi: %{y:.1f}%<extra></extra>"))
-    if len(test) > 0:
-        fig.add_vline(x=test.index[0].isoformat(), line_color="#9CA3AF",
-            line_width=1.2, line_dash="dot")
+        name=f"Fitted | RMSE={rmse:.1f}% | MAPE={mape_label}",
+        hovertemplate="<b>%{x|%b %Y}</b><br>Fitted: %{y:.1f}%<extra></extra>"))
     order_str = f"SARIMA{info['order']}×{info['seasonal_order']}"
     apply_base(fig,
         title=dict(text=f"{title} — {order_str} | d={info['d']} m={info['m']} | AIC={info['model'].aic:.1f}",
@@ -948,11 +940,9 @@ def chart_forecast(info: dict, fore: dict) -> go.Figure:
     fig.add_trace(go.Scatter(x=monthly.index, y=monthly.values,
         line=dict(color="#9CA3AF", width=1.5), name="Historis",
         hovertemplate="<b>%{x|%b %Y}</b><br>Historis: %{y:.1f}%<extra></extra>"))
-    fig.add_trace(go.Scatter(x=info["test"].index, y=info["test"].values,
-        line=dict(color="#111827", width=2), mode="lines+markers",
-        marker=dict(size=5), name="Aktual (Test)",
-        hovertemplate="<b>%{x|%b %Y}</b><br>Aktual: %{y:.1f}%<extra></extra>"))
-    fig.add_trace(go.Scatter(x=info["pred_mean"].index, y=info["pred_mean"].values,
+    # Fitted values (full data, tanpa split)
+    fitted = info["pred_mean"]
+    fig.add_trace(go.Scatter(x=fitted.index, y=fitted.values,
         line=dict(color=color, width=1.5, dash="dot"), name="Fitted", opacity=0.7,
         hovertemplate="<b>%{x|%b %Y}</b><br>Fitted: %{y:.1f}%<extra></extra>"))
     flat_label = " ⚠️ Flat" if is_flat else f" (σ={fore_mean.std():.1f}%)"
@@ -2400,33 +2390,26 @@ def main():
                 enforce_invertibility=False
             ).fit(disp=False)
 
-            split_ = max(int(len(monthly) * 0.85), len(monthly) - 6)
-            train_, test_ = monthly.iloc[:split_], monthly.iloc[split_:]
-
-            model_train = SARIMAX(
-                train_,
-                order=order,
-                seasonal_order=s_order,
-                enforce_stationarity=False,
-                enforce_invertibility=False
-            ).fit(disp=False)
-
-            pred_ = model_train.get_forecast(steps=len(test_))
-            pm_ = pred_.predicted_mean.clip(0, 100)
-            pc_ = pred_.conf_int(alpha=0.10)
+            # Fitted values dari full data (tanpa split) — konsisten dengan notebook
+            fitted_ = model_full.fittedvalues.clip(0, 100)
+            common_ = monthly.index.intersection(fitted_.index)
+            actual_ = monthly.loc[common_]
+            fitted_ = fitted_.loc[common_]
+            pc_     = model_full.get_prediction().conf_int(alpha=0.10)
+            pc_     = pc_.loc[common_].clip(0, 100)
 
             sarima_models[villa] = {
                 **mi,
-                "model": model_full,
-                "train": train_,
-                "test": test_,
-                "monthly": monthly,
-                "pred_mean": pm_,
-                "pred_ci": pc_,
-                "rmse": compute_rmse(test_.values, pm_.values),
-                "mape": compute_mape(test_.values, pm_.values),
-                "color": villa_cfg.get(villa, {}).get("color", "#2563EB"),
-                "title": villa.replace("_villas", "").title(),
+                "model":          model_full,
+                "train":          monthly,                  # full data
+                "test":           pd.Series(dtype=float),   # kosong
+                "monthly":        monthly,
+                "pred_mean":      fitted_,
+                "pred_ci":        pc_,
+                "rmse":           compute_rmse(actual_.values, fitted_.values),
+                "mape":           compute_mape(actual_.values, fitted_.values),
+                "color":          villa_cfg.get(villa, {}).get("color", "#2563EB"),
+                "title":          villa.replace("_villas", "").title(),
             }
         except Exception:
             pass
