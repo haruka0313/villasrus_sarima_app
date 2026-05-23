@@ -556,28 +556,44 @@ def compute_mape(actual: np.ndarray, predicted: np.ndarray) -> float:
     return float(np.mean(np.abs((actual[mask] - predicted[mask]) / actual[mask])) * 100)
 
 def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
+    # Sama persis dengan notebook Cell 6:
+    # d=0 jika stasioner di level, d=1 jika diff(1), d=2 jika masih belum stasioner
     villa_d, rows = {}, []
     for villa, series in clean_occ.items():
         monthly = series.resample("MS").mean().dropna()
         res0 = adf_test(monthly)
+        p1_val, p2_val = None, None
+
         if res0["stationary"]:
-            d, note = 0, "✅ Stasioner pada level (d=0)"
+            d    = 0
+            note = "✅ Stasioner pada level (d=0)"
         else:
             diff1 = monthly.diff().dropna()
-            res1 = adf_test(diff1)
-            d    = 1
-            note = "🔄 Stasioner setelah diff(1) → d=1" if res1["stationary"] \
-                   else f"⚠️ Masih belum stasioner (p={res1['pvalue']:.3f}), d=1 digunakan"
+            res1  = adf_test(diff1)
+            p1_val = res1["pvalue"]
+            if res1["stationary"]:
+                d    = 1
+                note = "🔄 Stasioner setelah diff(1) -> d=1"
+            else:
+                diff2 = monthly.diff().diff().dropna()
+                res2  = adf_test(diff2)
+                p2_val = res2["pvalue"]
+                d    = 2
+                note = "🔄 Stasioner setelah diff(2) -> d=2" if res2["stationary"] \
+                       else f"⚠️ Masih belum stasioner (p={res2['pvalue']:.3f}), d=2 digunakan"
+
         villa_d[villa] = d
         rows.append({
-            "Vila":         villa.replace("_villas", "").title(),
-            "Area":         villa_cfg.get(villa, {}).get("area", "").title(),
-            "N (bln)":      len(monthly),
-            "ADF Stat":     res0["statistic"],
-            "p-value":      res0["pvalue"],
-            "Stasioner?":   "✅ Ya" if res0["stationary"] else "❌ Tidak",
-            "d digunakan":  d,
-            "Keterangan":   note,
+            "Vila":            villa.replace("_villas", "").title(),
+            "Area":            villa_cfg.get(villa, {}).get("area", "").title(),
+            "N (bln)":         len(monthly),
+            "ADF Stat":        res0["statistic"],
+            "p-value (Level)": res0["pvalue"],
+            "Stasioner?":      "✅ Ya" if res0["stationary"] else "❌ Tidak",
+            "p-value (d1)":    p1_val if p1_val is not None else "-",
+            "p-value (d2)":    p2_val if p2_val is not None else "-",
+            "d digunakan":     d,
+            "Keterangan":      note,
         })
     return villa_d, pd.DataFrame(rows)
 
@@ -608,26 +624,33 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
     # ══════════════════════════════════════════════════════
     # STEP 1 — Pilih model terbaik via AIC dari FULL data
     # (sesuai metodologi skripsi: AIC dihitung dari semua data)
+    # CATATAN: D tidak dikunci (None) agar konsisten dengan notebook
     # ══════════════════════════════════════════════════════
     try:
-        auto = auto_arima(
+        all_fits = auto_arima(
             monthly,                    # ← full data untuk seleksi AIC
-            seasonal     = use_seasonal,
-            m            = m if use_seasonal else 1,
-            d            = d,
-            D            = 1,           # seasonal differencing dikunci
-            start_p=0,   max_p = 3,
-            start_q=0,   max_q = 3,
-            start_P=0,   max_P = 2,
-            start_Q=0,   max_Q = 2,
+            seasonal          = use_seasonal,
+            m                 = m if use_seasonal else 1,
+            d                 = d,
+            D                 = None,   # ← sama dengan notebook: D dipilih otomatis
+            start_p=0,        max_p = 3,
+            start_q=0,        max_q = 3,
+            start_P=0,        max_P = 2,
+            start_Q=0,        max_Q = 2,
             information_criterion = "aic",
             stepwise          = True,
+            return_valid_fits = True,   # ← sama dengan notebook
             error_action      = "ignore",
             suppress_warnings = True,
             trace             = False,
         )
-        order         = auto.order
-        seasonal_order = auto.seasonal_order
+        # Pilih model dengan AIC terkecil (sama persis dengan notebook)
+        if isinstance(all_fits, list) and len(all_fits) > 0:
+            best_model     = sorted(all_fits, key=lambda mdl: mdl.aic())[0]
+        else:
+            best_model     = all_fits
+        order          = best_model.order
+        seasonal_order = best_model.seasonal_order
     except Exception:
         # Fallback sederhana jika auto_arima gagal
         order          = (1, d, 0)
