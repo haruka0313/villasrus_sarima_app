@@ -45,12 +45,14 @@ load_dotenv()
 # ══════════════════════════════════════════════════════════════
 
 FORECAST_STEPS         = 6
-MIN_SEASONAL_TRAIN     = 30
+MIN_SEASONAL_TRAIN     = 24    # notebook v2: minimal 24 bulan untuk seasonal
 FLAT_STD_THRESH        = 1.5
 MIN_CYCLES             = 2
 ACF_ALPHA              = 0.10
 FALLBACK_M             = 12
 SESSION_DURATION_HOURS = 24 * 30
+TEST_RATIO             = 0.20  # notebook v2: split 80/20
+CI_ALPHA               = 0.10  # notebook v2: confidence interval 90%
 
 # ── BARU (notebook v2 Cell 1): filter AIC tidak wajar ──
 AIC_VALID_MIN = 20.0   # AIC di bawah ini → model gagal konvergen / error code
@@ -58,34 +60,48 @@ AIC_VALID_MIN = 20.0   # AIC di bawah ini → model gagal konvergen / error code
 # ══════════════════════════════════════════════════════════════
 # HARDCODE OVERRIDE — identik notebook v2 Cell 9
 # ══════════════════════════════════════════════════════════════
-# Beberapa villa menghasilkan model berbeda antara app dan notebook
-# karena grid search menemukan AIC lebih kecil tapi kurang stabil.
-# Override ini memaksa order yang SAMA dengan notebook v2.
+# Semua 7 villa di-hardcode agar hasil SELALU identik notebook v2.
+# Grid search auto_arima dilewati untuk villa yang ada di dict ini.
 #
+# Sumber nilai: notebook v2 Cell 9 (Image hasil tabel ringkasan).
 # Format: "villa_key": {"order": (p,d,q), "seasonal_order": (P,D,Q,m)}
-# Kosongkan dict (hapus entry) untuk kembali ke mode grid search biasa.
 # ──────────────────────────────────────────────────────────────────────
 SARIMA_OVERRIDE: dict = {
-    # Notebook: SARIMA(1,1,1)x(1,1,2,7) AIC=89.40 RMSE=13.30 SMAPE=12.56
-    # App grid: SARIMA(2,1,1)x(1,1,2,7) AIC=86.12 (lebih rendah tapi p=2 overfitting)
+    # AIC=89.40  RMSE=13.30  SMAPE=12.56
     "briana_villas": {
         "order":          (1, 1, 1),
         "seasonal_order": (1, 1, 2, 7),
     },
-    # Notebook: SARIMA(2,1,1)x(2,1,0,6) AIC=146.20 RMSE=29.14 SMAPE=70.96
-    # App grid: SARIMA(2,1,1)x(0,1,2,6) AIC=145.56 (seasonal beda → SMAPE=124%)
+    # AIC=102.49  RMSE=21.95  SMAPE=28.20
+    "castello_villas": {
+        "order":          (0, 1, 2),
+        "seasonal_order": (1, 1, 2, 7),
+    },
+    # AIC=146.20  RMSE=29.14  SMAPE=70.96
     "elina_villas": {
         "order":          (2, 1, 1),
         "seasonal_order": (2, 1, 0, 6),
     },
-    # Notebook: SARIMA(0,0,1)x(0,1,2,6) AIC=140.49 RMSE=14.79 SMAPE=18.09
-    # App grid: SARIMA(0,0,2)x(0,1,2,6) AIC=132.67 (q=2 overfitting)
+    # AIC=197.23  RMSE=17.35  SMAPE=16.38
+    "isola_villas": {
+        "order":          (1, 1, 1),
+        "seasonal_order": (2, 1, 1, 4),
+    },
+    # AIC=87.66  RMSE=14.02  SMAPE=14.42
+    "eindra_villas": {
+        "order":          (0, 0, 1),
+        "seasonal_order": (0, 1, 1, 12),
+    },
+    # AIC=90.011  RMSE=16.56  SMAPE=14.87
+    "esha_villas": {
+        "order":          (0, 0, 1),
+        "seasonal_order": (0, 1, 1, 12),
+    },
+    # AIC=140.49  RMSE=14.79  SMAPE=18.09
     "ozamiz_villas": {
         "order":          (0, 0, 1),
         "seasonal_order": (0, 1, 2, 6),
     },
-    # castello_villas ✅ sama   isola_villas ✅ sama
-    # eindra_villas   ✅ sama   esha_villas  ✅ sama
 }
 
 SESSION_KEY  = "_sess_token"
