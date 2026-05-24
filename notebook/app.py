@@ -45,14 +45,23 @@ load_dotenv()
 # ══════════════════════════════════════════════════════════════
 
 FORECAST_STEPS         = 6
-MIN_SEASONAL_TRAIN     = 30
+MIN_SEASONAL_TRAIN     = 24    # ← notebook v2: MIN_TRAIN_MONTHS = 24
 FLAT_STD_THRESH        = 1.5
 MIN_CYCLES             = 2
 ACF_ALPHA              = 0.10
 FALLBACK_M             = 12
 SESSION_DURATION_HOURS = 24 * 30
+TEST_RATIO             = 0.20  # ← notebook v2: TEST_RATIO = 0.20
+CI_ALPHA               = 0.10  # ← notebook v2: CI_ALPHA = 0.10
 
-# ── BARU (notebook v2 Cell 1): filter AIC tidak wajar ──
+# ── Kandidat m per area (dari pengetahuan domain — notebook v2 Cell 7) ──
+M_CANDIDATES_BY_AREA = {
+    "canggu"  : [4, 6, 7, 12],
+    "seminyak": [6, 12],
+}
+M_CANDIDATES_DEFAULT = [4, 6, 12]
+
+# ── Filter AIC tidak wajar (notebook v2 Cell 1) ──
 AIC_VALID_MIN = 20.0   # AIC di bawah ini → model gagal konvergen / error code
 
 SESSION_KEY  = "_sess_token"
@@ -607,55 +616,46 @@ def adf_test(series: pd.Series) -> dict:
     }
 
 
-def detect_m(monthly: pd.Series) -> tuple[int, str]:
+def detect_m(monthly: pd.Series, area: str = "") -> tuple[int, str]:
     """
     Identik notebook v2 Cell 7:
-    1. Periodogram FFT → periode power tertinggi yang lolos guard (4 ≤ m ≤ n // MIN_CYCLES)
-    2. ACF → spike signifikan pertama sebagai fallback
-    3. Prioritas: periodogram > acf_only > fallback (m=12)
+    1. Gunakan M_CANDIDATES_BY_AREA per area (domain knowledge)
+    2. Periodogram FFT → pilih kandidat dengan power tertinggi
+    3. Batasi kandidat agar < n/2 (data tidak cukup → m=1/fallback)
+    4. Fallback m=12 jika tidak ada kandidat valid
     """
     n = len(monthly)
 
-    # ── 1. Periodogram
-    freqs, power = scipy_periodogram(monthly.values)
-    valid_mask  = freqs[1:] > 0
-    periods_raw = 1.0 / freqs[1:][valid_mask]
-    power_raw   = power[1:][valid_mask]
+    # ── 1. Pilih kandidat m berdasarkan area (identik notebook v2 Cell 7)
+    cands = M_CANDIDATES_BY_AREA.get(area.lower(), M_CANDIDATES_DEFAULT)
 
-    periods_int = np.round(periods_raw).astype(int)
-    period_power: dict = {}
-    for p, pw in zip(periods_int, power_raw):
-        if p not in period_power or pw > period_power[p]:
-            period_power[p] = pw
+    # ── Batasi kandidat agar tidak melebihi 1/2 panjang data
+    cands = [m for m in cands if m < n / 2]
 
-    sorted_periods = sorted(period_power, key=period_power.get, reverse=True)
+    if not cands:
+        # Data terlalu pendek → non-seasonal
+        return 1, "non_seasonal"
 
-    pgram_m = None
-    for p in sorted_periods:
-        if 4 <= p <= n // MIN_CYCLES:
-            pgram_m = int(p)
-            break
+    if n < 24:
+        # Data terlalu pendek untuk seasonal yang reliabel → fallback
+        return FALLBACK_M, "fallback"
 
-    # ── 2. ACF spike signifikan pertama
-    nlags = min(n // 2, 36)
-    acf_spike_m = None
-    try:
-        acf_vals, ci = sm_acf(monthly, nlags=nlags, alpha=ACF_ALPHA, fft=True)
-        for lag in range(4, nlags + 1):
-            if 4 <= lag <= n // MIN_CYCLES:
-                outside = (acf_vals[lag] > ci[lag][1] - acf_vals[lag] or
-                           acf_vals[lag] < ci[lag][0] - acf_vals[lag])
-                if outside:
-                    acf_spike_m = lag
-                    break
-    except Exception:
-        pass
+    # ── 2. Periodogram: pilih kandidat dengan spectral power tertinggi
+    freqs, power = scipy_periodogram(monthly.values, scaling="density")
 
-    # ── 3. Pilih m final
-    if pgram_m is not None:
-        return pgram_m, "periodogram"
-    elif acf_spike_m is not None:
-        return acf_spike_m, "acf_only"
+    best_m     = FALLBACK_M
+    best_power = -1.0
+
+    for m in cands:
+        target_freq = 1.0 / m
+        idx = int(np.argmin(np.abs(freqs - target_freq)))
+        p   = power[idx]
+        if p > best_power:
+            best_power = p
+            best_m     = m
+
+    if best_m != FALLBACK_M:
+        return best_m, "periodogram"
     else:
         return FALLBACK_M, "fallback"
 
@@ -722,15 +722,16 @@ def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
 
 
 def run_detect_m_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
-    """Identik notebook v2 Cell 7 — jalankan detect_m per villa."""
+    """Identik notebook v2 Cell 7 — jalankan detect_m per villa, pass area."""
     villa_m, rows = {}, []
     for villa, series in clean_occ.items():
         monthly = series.resample("MS").mean().dropna()
-        m, method = detect_m(monthly)
+        area    = villa_cfg.get(villa, {}).get("area", "")
+        m, method = detect_m(monthly, area=area)
         villa_m[villa] = m
         rows.append({
             "Vila":    villa.replace("_villas", "").title(),
-            "Area":    villa_cfg.get(villa, {}).get("area", "").title(),
+            "Area":    area.title(),
             "N (bln)": len(monthly),
             "m":       m,
             "Metode":  method,
@@ -765,21 +766,21 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
     4. model_full (100%) untuk AIC final & forecast masa depan
     """
     monthly      = series.resample("MS").mean().dropna()
-    use_seasonal = len(monthly) >= MIN_SEASONAL_TRAIN
+    use_seasonal = len(monthly) >= MIN_SEASONAL_TRAIN and m > 1  # ← notebook: >= 24 AND m > 1
 
     # ── Step 1: auto_arima — FIX-1: tanpa return_valid_fits
     try:
         best_sw = auto_arima(
             monthly,
             d                    = d,
-            D                    = 1,
+            D                    = 1 if use_seasonal else 0,
             m                    = m if use_seasonal else 1,
             start_p              = 0,
             start_q              = 0,
             start_P              = 0,
             start_Q              = 0,
-            max_p                = 3,
-            max_q                = 3,
+            max_p                = 2,   # ← notebook v2: max_p=2
+            max_q                = 2,   # ← notebook v2: max_q=2
             max_P                = 2,
             max_Q                = 2,
             seasonal             = use_seasonal,
@@ -806,8 +807,8 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
     found_valid = False  # FIX-5: track apakah ada model valid
 
     if use_seasonal:
-        p_candidates = sorted(set([0, seed_p, max(0, seed_p - 1), min(3, seed_p + 1)]))
-        q_candidates = sorted(set([0, seed_q, max(0, seed_q - 1), min(3, seed_q + 1)]))
+        p_candidates = sorted(set([0, seed_p, max(0, seed_p - 1), min(2, seed_p + 1)]))  # ← max 2
+        q_candidates = sorted(set([0, seed_q, max(0, seed_q - 1), min(2, seed_q + 1)]))  # ← max 2
 
         for p_try in p_candidates:
             for q_try in q_candidates:
@@ -844,8 +845,8 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
     if order == (0, 0, 0) and seasonal_order[:3] == (0, 0, 0):
         order = (1, d, 0)
 
-    # ── Step 3: Split 80/20 (identik notebook v2)
-    n_test    = max(int(len(monthly) * 0.20), 3)
+    # ── Step 3: Split TEST_RATIO (identik notebook v2)
+    n_test    = max(int(len(monthly) * TEST_RATIO), 3)
     split_idx = len(monthly) - n_test
     train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
 
@@ -870,7 +871,7 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
 
     pred_obj  = model_train.get_forecast(steps=len(test))
     pred_mean = pred_obj.predicted_mean.clip(0, 100)
-    pred_ci   = pred_obj.conf_int(alpha=0.10)
+    pred_ci   = pred_obj.conf_int(alpha=CI_ALPHA)  # ← gunakan CI_ALPHA dari konstanta
 
     rmse_val  = compute_rmse(test.values, pred_mean.values)
     smape_val = compute_smape(test.values, pred_mean.values)
@@ -949,7 +950,7 @@ def make_forecast(info: dict) -> dict:
 
     fore_obj  = model_full.get_forecast(steps=FORECAST_STEPS)
     fore_mean = fore_obj.predicted_mean.clip(0, 100)
-    fore_ci   = fore_obj.conf_int(alpha=0.10).clip(0, 100)  # FIX-D: clip konsisten
+    fore_ci   = fore_obj.conf_int(alpha=CI_ALPHA).clip(0, 100)  # FIX-D: clip konsisten
     is_flat   = fore_mean.std() < FLAT_STD_THRESH
 
     # ── Retry jika flat
@@ -977,7 +978,7 @@ def make_forecast(info: dict) -> dict:
 
                 fc       = mc.get_forecast(steps=FORECAST_STEPS)
                 fc_mean  = fc.predicted_mean.clip(0, 100)   # FIX-D: clip konsisten
-                fc_ci    = fc.conf_int(alpha=0.10).clip(0, 100)  # FIX-D: clip konsisten
+                fc_ci    = fc.conf_int(alpha=CI_ALPHA).clip(0, 100)  # FIX-D: clip konsisten
                 std_cand = fc_mean.std()
 
                 # FIX-C: update hanya jika ada variansi DAN AIC valid
@@ -2515,7 +2516,7 @@ def main():
 
     with st.spinner("Analisis ADF & deteksi siklus..."):
         villa_d, _ = run_adf_all(clean_occ, villa_cfg)
-        villa_m, _ = run_detect_m_all(clean_occ, villa_cfg)
+        villa_m, _ = run_detect_m_all(clean_occ, villa_cfg)  # area sudah di-pass di dalam fungsi
 
     # ── SARIMA Models ──
     sarima_models: dict = {}
@@ -2540,8 +2541,8 @@ def main():
             color_  = villa_cfg.get(villa, {}).get("color", "#2563EB")
             title_  = villa.replace("_villas", "").title()
 
-            # ── Split 80/20 identik notebook v2 Cell 9
-            n_test_    = max(int(len(monthly) * 0.20), 3)
+            # ── Split TEST_RATIO identik notebook v2 Cell 9
+            n_test_    = max(int(len(monthly) * TEST_RATIO), 3)
             split_idx_ = len(monthly) - n_test_
             train_, test_ = monthly.iloc[:split_idx_], monthly.iloc[split_idx_:]
 
@@ -2553,7 +2554,7 @@ def main():
 
             pred_obj_  = model_train_.get_forecast(steps=len(test_))
             pred_mean_ = pred_obj_.predicted_mean.clip(0, 100)
-            pred_ci_   = pred_obj_.conf_int(alpha=0.10)
+            pred_ci_   = pred_obj_.conf_int(alpha=CI_ALPHA)  # ← gunakan CI_ALPHA dari konstanta
 
             rmse_ = compute_rmse(test_.values, pred_mean_.values)
             mape_ = compute_smape(test_.values, pred_mean_.values)
