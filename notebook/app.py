@@ -47,11 +47,13 @@ load_dotenv()
 FORECAST_STEPS         = 6
 MIN_SEASONAL_TRAIN     = 30
 FLAT_STD_THRESH        = 1.5
-# ── Identik notebook Cell 7b ──
 MIN_CYCLES             = 2
 ACF_ALPHA              = 0.10
 FALLBACK_M             = 12
 SESSION_DURATION_HOURS = 24 * 30
+
+# ── BARU (notebook v2 Cell 1): filter AIC tidak wajar ──
+AIC_VALID_MIN = 20.0   # AIC di bawah ini → model gagal konvergen / error code
 
 SESSION_KEY  = "_sess_token"
 MODEL_BUCKET = "sarima-models"
@@ -106,6 +108,35 @@ def hex_rgba(hex_color: str, alpha: float = 0.15) -> str:
     h = hex_color.lstrip("#")
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     return f"rgba({r},{g},{b},{alpha})"
+
+
+# ══════════════════════════════════════════════════════════════
+# AIC VALIDATION  ← BARU (notebook v2)
+# ══════════════════════════════════════════════════════════════
+
+def is_valid_aic(aic_value: float, min_val: float = AIC_VALID_MIN) -> bool:
+    """
+    Cek apakah nilai AIC dari model SARIMAX valid.
+
+    Masalah yang ditangani (ditemukan dari AIC grid search data nyata):
+    - AIC = 4, 6, 8, 10, 12 ... → bilangan bulat genap kecil = error code /
+      model tidak konvergen, bukan AIC yang sesungguhnya.
+    - AIC < AIC_VALID_MIN (default 20) → tidak wajar secara statistik
+      untuk data time series skala occupancy.
+    - AIC = NaN / inf → model gagal total.
+
+    Referensi: notebook v2 Cell 1 & Cell 9.
+    """
+    if aic_value is None:
+        return False
+    if not np.isfinite(aic_value):
+        return False
+    if aic_value < min_val:
+        return False
+    # Bilangan bulat genap < 30 → kemungkinan besar error code bukan AIC
+    if aic_value < 30 and aic_value == int(aic_value) and int(aic_value) % 2 == 0:
+        return False
+    return True
 
 
 # ══════════════════════════════════════════════════════════════
@@ -442,7 +473,24 @@ def clean_occupancy(df: pd.DataFrame) -> pd.Series:
     date_col = _find_col(df, ["date", "tanggal", "tgl"]) or df.columns[0]
     df[date_col] = _parse_dates(df[date_col])
     df = df.dropna(subset=[date_col]).sort_values(date_col).set_index(date_col)
-    occ_col = _find_col(df, ["occupancy", "occ", "hunian", "occupied"])
+
+    # ── Prioritas: exact match → keyword (exclude total) → occupancy total
+    occ_col = None
+    for exact in ["Occupancy", "occupancy"]:
+        if exact in df.columns:
+            occ_col = exact
+            break
+    if occ_col is None:
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            if col_lower == "occupancy total":
+                continue
+            if any(kw in col_lower for kw in ["occupancy", "occ", "hunian", "occupied"]):
+                occ_col = col
+                break
+    if occ_col is None:
+        occ_col = _find_col(df, ["occupancy", "occ", "hunian", "occupied"])
+
     if occ_col:
         series = _parse_occupancy(df[occ_col]).rename("occupancy")
     else:
@@ -454,10 +502,14 @@ def clean_occupancy(df: pd.DataFrame) -> pd.Series:
         else:
             num_cols = df.select_dtypes(include=np.number).columns
             series = _parse_occupancy(df[num_cols[0]]).rename("occupancy")
+
+    # ── Reindex harian + interpolasi (identik notebook v2 Cell 3)
     full_idx = pd.date_range(series.index.min(), series.index.max(), freq="D")
-    series   = (series.reindex(full_idx)
+    series   = (series
+                .reindex(full_idx)
                 .interpolate(method="time", limit=7)
-                .ffill().bfill()
+                .ffill()
+                .bfill()
                 .clip(0, 100))
     return series
 
@@ -522,7 +574,7 @@ def adf_test(series: pd.Series) -> dict:
 
 def detect_m(monthly: pd.Series) -> tuple[int, str]:
     """
-    Identik dengan notebook Cell 7b:
+    Identik notebook v2 Cell 7:
     1. Periodogram FFT → periode power tertinggi yang lolos guard (4 ≤ m ≤ n // MIN_CYCLES)
     2. ACF → spike signifikan pertama sebagai fallback
     3. Prioritas: periodogram > acf_only > fallback (m=12)
@@ -549,7 +601,7 @@ def detect_m(monthly: pd.Series) -> tuple[int, str]:
             pgram_m = int(p)
             break
 
-    # ── 2. ACF — cari spike signifikan pertama (identik notebook)
+    # ── 2. ACF spike signifikan pertama
     nlags = min(n // 2, 36)
     acf_spike_m = None
     try:
@@ -564,7 +616,7 @@ def detect_m(monthly: pd.Series) -> tuple[int, str]:
     except Exception:
         pass
 
-    # ── 3. Pilih m final (prioritas: periodogram > acf_only > fallback)
+    # ── 3. Pilih m final
     if pgram_m is not None:
         return pgram_m, "periodogram"
     elif acf_spike_m is not None:
@@ -579,7 +631,7 @@ def compute_rmse(actual, predicted) -> float:
 
 def compute_smape(actual: np.ndarray, predicted: np.ndarray) -> float:
     """
-    Symmetric Mean Absolute Percentage Error — identik notebook Cell 9.
+    Symmetric Mean Absolute Percentage Error — identik notebook v2 Cell 1.
     Menghindari division-by-zero jika keduanya nol.
     """
     actual    = np.array(actual, dtype=float)
@@ -595,7 +647,7 @@ def compute_mape(actual: np.ndarray, predicted: np.ndarray) -> float:
 
 def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
     """
-    Identik notebook Cell 8 (versi fix-B):
+    Identik notebook v2 Cell 6:
     - d di-CAP maksimum 1 (d=2 tidak stabil untuk data pendek)
     - d=0 jika stasioner di level
     - d=1 selainnya (meski diff(1) belum sempurna stasioner)
@@ -613,7 +665,7 @@ def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
             diff1  = monthly.diff().dropna()
             res1   = adf_test(diff1)
             p1_val = res1["pvalue"]
-            d      = 1   # CAP d=1 — identik notebook fix-B
+            d      = 1   # CAP d=1
             if res1["stationary"]:
                 note = f"🔄 Diff(1) stasioner (p_level={res0['pvalue']} → p_diff1={p1_val})"
             else:
@@ -635,7 +687,7 @@ def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
 
 
 def run_detect_m_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
-    """Identik notebook Cell 7b — jalankan detect_m per villa."""
+    """Identik notebook v2 Cell 7 — jalankan detect_m per villa."""
     villa_m, rows = {}, []
     for villa, series in clean_occ.items():
         monthly = series.resample("MS").mean().dropna()
@@ -653,30 +705,35 @@ def run_detect_m_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFra
 
 
 # ══════════════════════════════════════════════════════════════
-# SARIMA — TRAINING & FORECAST
+# SARIMA — TRAINING & FORECAST  (notebook v2 Cell 9 + Cell 10)
 # ══════════════════════════════════════════════════════════════
 
 def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> dict:
     """
-    Identik notebook Cell 9 (dengan fix return_valid_fits):
+    Identik notebook v2 Cell 9.
 
-    [FIX-1] return_valid_fits dihapus — menyebabkan bug tuple.aic() di pmdarima terbaru.
-            auto_arima langsung return 1 best model → lebih aman & konsisten.
+    Perbaikan vs versi lama:
+    ─────────────────────────────────────────────────────────
+    [FIX-1] return_valid_fits dihapus (bug tuple.aic() pmdarima terbaru).
+    [FIX-2] is_valid_aic() memfilter AIC tidak wajar (4, 6, 8, 10 ...) sebelum
+            dibandingkan — model dengan AIC error code tidak bisa jadi pemenang.
+    [FIX-3] Seed AIC dari auto_arima juga divalidasi; jika tidak valid,
+            seed_p/seed_q di-reset ke default (1,1) agar grid search tetap aman.
+    [FIX-4] best_aic hanya di-update jika is_valid_aic(fit.aic) = True.
+    [FIX-5] Fallback eksplisit jika tidak ada model grid yang valid.
 
     Pipeline:
     ─────────
-    1. auto_arima (stepwise) → kandidat terbaik p, q
-    2. Grid search SARIMAX: p ∈ kandidat, q ∈ kandidat, P ∈ {0,1,2}, Q ∈ {0,1,2}
-       → pilih berdasarkan AIC terkecil (identik notebook)
+    1. auto_arima (stepwise) → seed p, q
+    2. Grid search SARIMAX p×q×P×Q → pilih AIC terkecil yang VALID
     3. Split 80/20 → model_train (80%) untuk RMSE & SMAPE pada TEST SET
     4. model_full (100%) untuk AIC final & forecast masa depan
-    5. Return dict lengkap termasuk train_fitted (identik notebook)
     """
     monthly      = series.resample("MS").mean().dropna()
     use_seasonal = len(monthly) >= MIN_SEASONAL_TRAIN
 
+    # ── Step 1: auto_arima — FIX-1: tanpa return_valid_fits
     try:
-        # ── Step 1: auto_arima (stepwise) — FIX-1: hapus return_valid_fits
         best_sw = auto_arima(
             monthly,
             d                    = d,
@@ -696,53 +753,68 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
             error_action         = "ignore",
             suppress_warnings    = True,
             trace                = False,
-            # return_valid_fits DIHAPUS — bug tuple.aic() di pmdarima terbaru
         )
-        best_p, _, best_q = best_sw.order
+        seed_p, _, seed_q = best_sw.order
 
-        # ── Step 2: Grid search SARIMAX — identik notebook Cell 9
-        best_aic    = float("inf")
-        best_order  = best_sw.order
-        best_sorder = best_sw.seasonal_order
-
-        if use_seasonal:
-            p_candidates = sorted(set([0, best_p, max(0, best_p - 1), min(3, best_p + 1)]))
-            q_candidates = sorted(set([0, best_q, max(0, best_q - 1), min(3, best_q + 1)]))
-            for p_try in p_candidates:
-                for q_try in q_candidates:
-                    for P_try in range(0, 3):
-                        for Q_try in range(0, 3):
-                            try:
-                                fit = SARIMAX(
-                                    monthly,
-                                    order=(p_try, d, q_try),
-                                    seasonal_order=(P_try, 1, Q_try, m),
-                                    enforce_stationarity=False,
-                                    enforce_invertibility=False,
-                                ).fit(disp=False)
-                                if fit.aic < best_aic:
-                                    best_aic    = fit.aic
-                                    best_order  = (p_try, d, q_try)
-                                    best_sorder = (P_try, 1, Q_try, m)
-                            except Exception:
-                                continue
-
-        order          = best_order
-        seasonal_order = best_sorder
+        # FIX-3: validasi AIC seed
+        seed_aic = best_sw.aic()
+        if not is_valid_aic(seed_aic):
+            seed_p, seed_q = 1, 1  # reset ke default yang aman
 
     except Exception:
-        order          = (1, d, 0)
-        seasonal_order = (0, 1, 0, m if use_seasonal else 0)
+        seed_p, seed_q = 1, 1
 
+    # ── Step 2: Grid search SARIMAX dengan validasi AIC — FIX-2 & FIX-4
+    best_aic    = float("inf")
+    best_order  = (seed_p, d, seed_q)
+    best_sorder = (0, 1, 1, m) if use_seasonal else (0, 0, 0, 0)
+    found_valid = False  # FIX-5: track apakah ada model valid
+
+    if use_seasonal:
+        p_candidates = sorted(set([0, seed_p, max(0, seed_p - 1), min(3, seed_p + 1)]))
+        q_candidates = sorted(set([0, seed_q, max(0, seed_q - 1), min(3, seed_q + 1)]))
+
+        for p_try in p_candidates:
+            for q_try in q_candidates:
+                for P_try in range(0, 3):
+                    for Q_try in range(0, 3):
+                        try:
+                            fit = SARIMAX(
+                                monthly,
+                                order          = (p_try, d, q_try),
+                                seasonal_order = (P_try, 1, Q_try, m),
+                                enforce_stationarity  = False,
+                                enforce_invertibility = False,
+                            ).fit(disp=False)
+
+                            # FIX-2 & FIX-4: hanya update best jika AIC valid
+                            if is_valid_aic(fit.aic) and fit.aic < best_aic:
+                                best_aic    = fit.aic
+                                best_order  = (p_try, d, q_try)
+                                best_sorder = (P_try, 1, Q_try, m)
+                                found_valid = True
+
+                        except Exception:
+                            continue
+
+    # FIX-5: fallback jika tidak ada model grid yang valid
+    if not found_valid:
+        best_order  = (1, d, 1)
+        best_sorder = (0, 1, 1, m) if use_seasonal else (0, 0, 0, 0)
+
+    order          = best_order
+    seasonal_order = best_sorder
+
+    # Guard: jika semua nol, pakai AR(1)
     if order == (0, 0, 0) and seasonal_order[:3] == (0, 0, 0):
         order = (1, d, 0)
 
-    # ── Step 3: Split 80/20 — identik notebook Cell 9
+    # ── Step 3: Split 80/20 (identik notebook v2)
     n_test    = max(int(len(monthly) * 0.20), 3)
     split_idx = len(monthly) - n_test
     train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
 
-    # ── Step 4: model_train (80%) — RMSE & SMAPE dihitung pada TEST SET
+    # ── Step 4: model_train (80%) — evaluasi pada TEST SET
     try:
         model_train = SARIMAX(
             train,
@@ -780,7 +852,6 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
     except Exception:
         model_full = model_train
 
-    # train_fitted — identik notebook Cell 9
     train_fitted = model_train.fittedvalues.clip(0, 100)
 
     return {
@@ -794,7 +865,7 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
         "d"             : d,
         "m"             : m,
         "use_seasonal"  : use_seasonal,
-        "pred_mean"     : pred_mean,       # get_forecast pada TEST SET 20%
+        "pred_mean"     : pred_mean,       # get_forecast TEST SET 20%
         "pred_ci"       : pred_ci,         # conf_int alpha=0.10
         "train_fitted"  : train_fitted,    # fittedvalues model_train
         "rmse"          : rmse_val,        # RMSE pada test set
@@ -807,23 +878,31 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
 
 def make_forecast(info: dict) -> dict:
     """
-    Identik notebook Cell 10:
-    - Refit model_full pada seluruh data
-    - Deteksi forecast flat (std < FLAT_STD_THRESH) → retry seasonal
-    - SEASONAL_RETRY menggunakan m dari info (bukan hardcode)
+    Identik notebook v2 Cell 10.
+
+    Perbaikan vs versi lama:
+    ─────────────────────────────────────────────────────────
+    [FIX-A] Kandidat retry seasonal menggunakan m dari info (bukan hardcode).
+    [FIX-B] AIC kandidat retry juga divalidasi via is_valid_aic() —
+            retry tidak boleh menghasilkan model dengan AIC error code.
+    [FIX-C] best_aic threshold retry dinaikkan (best_aic + 10) hanya
+            jika kandidat lolos validasi AIC.
     """
     monthly = info["monthly"]
     order, s_order, d = info["order"], info["seasonal_order"], info["d"]
     m = info.get("m", FALLBACK_M)
 
-    # SEASONAL_RETRY identik notebook Cell 10 FIX-D: pakai m_used
+    # FIX-A: SEASONAL_RETRY pakai m dari info (identik notebook v2)
     SEASONAL_RETRY = [
         (1, 0, 0, m),
         (0, 0, 1, m),
         (1, 0, 1, m),
+        (1, 1, 0, m),
+        (0, 1, 1, m),
+        (1, 1, 1, m),
     ]
 
-    # ── Refit pada SELURUH data (identik notebook)
+    # ── Refit pada SELURUH data
     try:
         model_full = SARIMAX(
             monthly, order=order, seasonal_order=s_order,
@@ -837,7 +916,7 @@ def make_forecast(info: dict) -> dict:
     fore_ci   = fore_obj.conf_int(alpha=0.10).clip(0, 100)
     is_flat   = fore_mean.std() < FLAT_STD_THRESH
 
-    # ── Retry jika flat — identik notebook Cell 10
+    # ── Retry jika flat
     if is_flat:
         best_aic    = model_full.aic
         best_fore   = fore_mean
@@ -845,18 +924,27 @@ def make_forecast(info: dict) -> dict:
         best_sorder = s_order
 
         for s_cand in SEASONAL_RETRY:
+            if s_cand == s_order:
+                continue
             try:
                 mc = SARIMAX(
                     monthly,
-                    order=(order[0], d, order[2]),
-                    seasonal_order=s_cand,
-                    enforce_stationarity=False,
-                    enforce_invertibility=False,
+                    order          = (order[0], d, order[2]),
+                    seasonal_order = s_cand,
+                    enforce_stationarity  = False,
+                    enforce_invertibility = False,
                 ).fit(disp=False)
-                fc      = mc.get_forecast(steps=FORECAST_STEPS)
-                fc_mean = fc.predicted_mean.clip(0, 100)
-                fc_ci   = fc.conf_int(alpha=0.10).clip(0, 100)
+
+                # FIX-B: validasi AIC kandidat retry
+                if not is_valid_aic(mc.aic):
+                    continue
+
+                fc       = mc.get_forecast(steps=FORECAST_STEPS)
+                fc_mean  = fc.predicted_mean.clip(0, 100)
+                fc_ci    = fc.conf_int(alpha=0.10).clip(0, 100)
                 std_cand = fc_mean.std()
+
+                # FIX-C: update hanya jika ada variansi DAN AIC valid
                 if std_cand > FLAT_STD_THRESH and mc.aic < best_aic + 10:
                     best_aic    = mc.aic
                     best_fore   = fc_mean
@@ -864,6 +952,7 @@ def make_forecast(info: dict) -> dict:
                     best_sorder = s_cand
                     is_flat     = False
                     break
+
             except Exception:
                 continue
 
@@ -1008,29 +1097,26 @@ def chart_acf_pacf(monthly: pd.Series, m: int, color: str, title: str) -> go.Fig
 
 def chart_model_fit(info: dict) -> go.Figure:
     """
-    Identik notebook Cell 10:
+    Identik notebook v2 Cell 11:
     train (abu) + test aktual (hitam) + prediksi test (warna villa) + CI 90%
     pred_mean = get_forecast pada TEST SET 20% (bukan in-sample)
     """
     train, test  = info["train"], info["test"]
-    pred_mean    = info["pred_mean"]   # prediksi pada TEST SET
+    pred_mean    = info["pred_mean"]
     pred_ci      = info["pred_ci"]
     color, title = info["color"], info["title"]
-    rmse         = info["rmse"]
-    smape        = info.get("smape", info.get("mape", float("nan")))
+    rmse_v       = info["rmse"]
+    smape_v      = info.get("smape", info.get("mape", float("nan")))
 
     fig = go.Figure()
-    # CI band
     fig.add_trace(go.Scatter(
         x=list(pred_ci.index) + list(pred_ci.index[::-1]),
         y=list(pred_ci.iloc[:, 1].clip(0, 100)) + list(pred_ci.iloc[:, 0].clip(0, 100)),
         fill="toself", fillcolor=hex_rgba(color, 0.12),
         line=dict(color="rgba(0,0,0,0)"), name="CI 90%", hoverinfo="skip"))
-    # Train (history)
     fig.add_trace(go.Scatter(x=train.index, y=train.values,
         line=dict(color="#9CA3AF", width=1.5), name="Data Latih",
         hovertemplate="<b>%{x|%b %Y}</b><br>Latih: %{y:.1f}%<extra></extra>"))
-    # Test actual
     if len(test) > 0:
         fig.add_trace(go.Scatter(x=test.index, y=test.values,
             line=dict(color="#111827", width=2.2), mode="lines+markers",
@@ -1038,12 +1124,11 @@ def chart_model_fit(info: dict) -> go.Figure:
             hovertemplate="<b>%{x|%b %Y}</b><br>Aktual: %{y:.1f}%<extra></extra>"))
         fig.add_vline(x=test.index[0].isoformat(), line_color="#9CA3AF",
             line_width=1.2, line_dash="dot")
-    # Prediksi test
-    smape_label = f"{smape:.1f}%" if not np.isnan(smape) else "—"
+    smape_label = f"{smape_v:.1f}%" if not np.isnan(smape_v) else "—"
     fig.add_trace(go.Scatter(x=pred_mean.index, y=pred_mean.values,
         line=dict(color=color, width=2.2, dash="dash"),
         mode="lines+markers", marker=dict(size=6, symbol="square"),
-        name=f"Prediksi | RMSE={rmse:.1f}% | SMAPE={smape_label}",
+        name=f"Prediksi | RMSE={rmse_v:.1f}% | SMAPE={smape_label}",
         hovertemplate="<b>%{x|%b %Y}</b><br>Prediksi: %{y:.1f}%<extra></extra>"))
     order_str = f"SARIMA{info['order']}×{info['seasonal_order']}"
     apply_base(fig,
@@ -1057,7 +1142,7 @@ def chart_model_fit(info: dict) -> go.Figure:
 
 
 def chart_forecast(info: dict, fore: dict) -> go.Figure:
-    """Identik notebook Cell 10: history + test aktual + fitted test + forecast."""
+    """Identik notebook v2 Cell 11: history + test aktual + fitted test + forecast."""
     monthly      = info["monthly"]
     train, test  = info["train"], info["test"]
     color, title = info["color"], info["title"]
@@ -1066,27 +1151,22 @@ def chart_forecast(info: dict, fore: dict) -> go.Figure:
     fore_color   = "#EF4444" if is_flat else color
 
     fig = go.Figure()
-    # CI forecast
     fig.add_trace(go.Scatter(
         x=list(fore_ci.index) + list(fore_ci.index[::-1]),
         y=list(fore_ci.iloc[:, 1]) + list(fore_ci.iloc[:, 0]),
         fill="toself", fillcolor=hex_rgba(fore_color, 0.10),
         line=dict(color="rgba(0,0,0,0)"), name="CI 90%", hoverinfo="skip"))
-    # History
     fig.add_trace(go.Scatter(x=monthly.index, y=monthly.values,
         line=dict(color="#9CA3AF", width=1.5), name="Historis",
         hovertemplate="<b>%{x|%b %Y}</b><br>Historis: %{y:.1f}%<extra></extra>"))
-    # Test aktual
     if len(test) > 0:
         fig.add_trace(go.Scatter(x=test.index, y=test.values,
             line=dict(color="#111827", width=2), mode="lines+markers",
             marker=dict(size=5), name="Aktual (Test)",
             hovertemplate="<b>%{x|%b %Y}</b><br>Aktual: %{y:.1f}%<extra></extra>"))
-    # Fitted pada test (pred_mean dari model_train → test set)
     fig.add_trace(go.Scatter(x=info["pred_mean"].index, y=info["pred_mean"].values,
         line=dict(color=color, width=1.5, dash="dot"), name="Fitted (Test)", opacity=0.7,
         hovertemplate="<b>%{x|%b %Y}</b><br>Fitted: %{y:.1f}%<extra></extra>"))
-    # Forecast
     flat_label = " ⚠️ Flat" if is_flat else f" (σ={fore_mean.std():.1f}%)"
     fig.add_trace(go.Scatter(
         x=fore_mean.index, y=fore_mean.values,
@@ -2035,8 +2115,28 @@ def page_strategi(
             section_header("Training Model SARIMA", "🚀")
             st.markdown(
                 "Model dilatih menggunakan **Auto ARIMA + Grid Search SARIMAX** "
-                "untuk order `(p,d,q)(P,D,Q)[m]` terbaik berdasarkan AIC. "
-                "Evaluasi: **RMSE & SMAPE** pada **test set 20%** — identik notebook Cell 9.")
+                "untuk order `(p,d,q)(P,D,Q)[m]` terbaik. "
+                "**AIC tidak wajar (nilai kecil bulat) otomatis difilter.** "
+                "Evaluasi: **RMSE & SMAPE** pada **test set 20%** — identik notebook v2 Cell 9.")
+
+            # ── Info AIC validation (baru) ──
+            with st.expander("ℹ️ Mengapa AIC Divalidasi?", expanded=False):
+                st.markdown(f"""
+                Dari analisis grid search data nyata, ditemukan model SARIMAX yang gagal konvergen
+                namun tetap menghasilkan AIC yang terlihat sangat bagus (mis. **4, 6, 8, 10, 12...**).
+
+                Nilai AIC tersebut adalah **error code**, bukan AIC statistik yang sesungguhnya.
+                Jika tidak difilter, model ini akan terpilih sebagai "terbaik" dan menghasilkan
+                **forecast flat (0%)** seperti yang terlihat di grafik Briana dan Castello.
+
+                **Filter yang diterapkan (`is_valid_aic()`):**
+                - AIC < {AIC_VALID_MIN} → ditolak
+                - AIC bulat genap < 30 (4, 6, 8, ...) → ditolak sebagai error code
+                - AIC = NaN / inf → ditolak
+
+                Referensi: notebook v2 Cell 1 & Cell 9.
+                """)
+
             avail_tr = [v for v in villa_cfg if v in clean_occ]
             if not avail_tr:
                 st.warning("Tidak ada vila dengan data. Upload data terlebih dahulu.")
@@ -2058,7 +2158,7 @@ def page_strategi(
                 })
             st.dataframe(pd.DataFrame(status_rows), use_container_width=True, hide_index=True)
 
-            # ── Expander: penjelasan RMSE & SMAPE dengan contoh data aktual ──
+            # ── Expander RMSE & SMAPE ──
             with st.expander("ℹ️ Cara Perhitungan RMSE & SMAPE — Contoh Data Aktual", expanded=False):
                 example_villa = next(
                     (v for v in avail_tr if v in sarima_models), None
@@ -2083,7 +2183,7 @@ def page_strategi(
                         st.markdown(f"##### 📌 Contoh: **{title_ex}** ({n_total} bulan total)")
                         st.markdown(f"""
                         RMSE & SMAPE dihitung dari **test set 20% ({n_pts} bulan)**,
-                        identik notebook Cell 9 — model_train dilatih pada 80% data awal.
+                        identik notebook v2 Cell 9 — model_train dilatih pada 80% data awal.
                         - 📅 **Periode:** {common_ex[0].strftime('%b %Y')} – {common_ex[-1].strftime('%b %Y')}
                         - **n =** {n_pts} bulan
                         """)
@@ -2091,7 +2191,6 @@ def page_strategi(
 
                         err     = act_vals - pred_vals
                         err_sq  = err ** 2
-                        # SMAPE identik notebook
                         denom_s = (np.abs(act_vals) + np.abs(pred_vals)) / 2.0
                         denom_s = np.where(denom_s == 0, 1.0, denom_s)
                         smape_each = np.abs(err) / denom_s * 100
@@ -2131,7 +2230,7 @@ def page_strategi(
                             )
                             st.success(f"✅ RMSE = **{rmse_val:.4f}%**")
                         with col_m:
-                            st.markdown("**SMAPE** (Symmetric MAPE — identik notebook)")
+                            st.markdown("**SMAPE** (Symmetric MAPE — identik notebook v2)")
                             st.latex(
                                 r"\text{SMAPE} = \frac{1}{n}\sum"
                                 r"\frac{|y_i-\hat{y}_i|}{(|y_i|+|\hat{y}_i|)/2}\times100\%"
@@ -2191,6 +2290,7 @@ def page_strategi(
                                 "Vila":      t_v,
                                 "Order":     f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
                                 "AIC":       round(info_tr["model"].aic, 2),
+                                "AIC Valid": "✅" if is_valid_aic(info_tr["model"].aic) else "⚠️",
                                 "RMSE (%)":  round(info_tr.get("rmse", 0), 2),
                                 "SMAPE (%)": round(info_tr.get("smape", 0), 2),
                                 "Status":    "✅ Berhasil",
@@ -2358,7 +2458,7 @@ def main():
         if villa in cache and villa in clean_occ:
             sarima_models[villa] = cache[villa]
 
-    # Prioritas 2: load dari DB — FIX-3: pakai split 80/20 identik notebook Cell 9
+    # Prioritas 2: load dari DB — split 80/20 identik notebook v2 Cell 9
     for villa in [v for v in selected_villas if v not in sarima_models and v in clean_occ]:
         mi = db_load_model(villa)
         if not mi:
@@ -2372,7 +2472,7 @@ def main():
             color_  = villa_cfg.get(villa, {}).get("color", "#2563EB")
             title_  = villa.replace("_villas", "").title()
 
-            # ── Split 80/20 identik notebook Cell 9
+            # ── Split 80/20 identik notebook v2 Cell 9
             n_test_    = max(int(len(monthly) * 0.20), 3)
             split_idx_ = len(monthly) - n_test_
             train_, test_ = monthly.iloc[:split_idx_], monthly.iloc[split_idx_:]
