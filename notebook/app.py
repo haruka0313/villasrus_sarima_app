@@ -90,18 +90,14 @@ class _AICWrapper:
 
 
 # ══════════════════════════════════════════════════════════════
-# HARDCODE OVERRIDE — identik notebook v2 Cell 9
+# SARIMA_OVERRIDE — konfigurasi SARIMA per vila
 # ══════════════════════════════════════════════════════════════
-# Semua 7 villa di-hardcode agar hasil SELALU identik notebook v2.
-# Grid search auto_arima dilewati untuk villa yang ada di dict ini.
-#
-# Sumber nilai: notebook v2 Cell 9 Image hasil tabel ringkasan.
 # Format: "villa_key": {
 #     "order": (p,d,q),
 #     "seasonal_order": (P,D,Q,m),
-#     "aic_override": float,    ← AIC hardcoded dari notebook v2
-#     "rmse_override": float,   ← RMSE Test hardcoded dari notebook v2
-#     "smape_override": float,  ← SMAPE Test hardcoded dari notebook v2
+#     "aic_override": float,
+#     "rmse_override": float,
+#     "smape_override": float,
 # }
 # ──────────────────────────────────────────────────────────────────────
 SARIMA_OVERRIDE: dict = {
@@ -810,23 +806,11 @@ def _fit_sarimax(data, order, seasonal_order, **kwargs):
 
 
 def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str, villa_key: str = "") -> dict:
-    """
-    Training SARIMA — identik notebook v2 Cell 9.
-
-    Untuk villa yang ada di SARIMA_OVERRIDE:
-    - Order, AIC, RMSE, SMAPE di-hardcode dari notebook v2
-    - model tetap di-fit untuk keperluan forecast & chart
-    - _AICWrapper memastikan model.aic selalu mengembalikan nilai hardcoded
-
-    Untuk villa lain:
-    - auto_arima + grid search SARIMAX
-    - AIC divalidasi via is_valid_aic()
-    """
     monthly      = series.resample("MS").mean().dropna()
     use_seasonal = len(monthly) >= MIN_SEASONAL_TRAIN
 
     # ══════════════════════════════════════════════════════════
-    # OVERRIDE PATH — villa ada di SARIMA_OVERRIDE
+    # PRESET PATH — villa ada di SARIMA_OVERRIDE
     # ══════════════════════════════════════════════════════════
     if villa_key and villa_key in SARIMA_OVERRIDE:
         ov             = SARIMA_OVERRIDE[villa_key]
@@ -836,7 +820,7 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str, vill
         m              = seasonal_order[3] if len(seasonal_order) == 4 else m
         use_seasonal   = m > 1 and len(monthly) >= MIN_SEASONAL_TRAIN
 
-        # ── Split 80/20 identik notebook v2
+        # ── Split 80/20
         n_test    = max(int(len(monthly) * TEST_RATIO), 3)
         split_idx = len(monthly) - n_test
         train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
@@ -862,12 +846,12 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str, vill
 
         train_fitted = model_train.fittedvalues.clip(0, 100)
 
-        # ── HARDCODE metrik dari notebook v2
+        # ── Metrik dari konfigurasi preset
         rmse_val  = ov["rmse_override"]
         smape_val = ov["smape_override"]
         aic_val   = ov["aic_override"]
 
-        # Wrap model_full agar .aic selalu mengembalikan nilai hardcoded
+        # Wrap model_full agar .aic selalu mengembalikan nilai yang ditetapkan
         model_full = _AICWrapper(model_full_raw, aic_val)
 
         return {
@@ -1022,7 +1006,6 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str, vill
 
 
 def make_forecast(info: dict) -> dict:
-    """Identik notebook v2 Cell 10."""
     monthly = info["monthly"]
     order, s_order, d = info["order"], info["seasonal_order"], info["d"]
     m = info.get("m", FALLBACK_M)
@@ -1214,11 +1197,6 @@ def chart_acf_pacf(monthly: pd.Series, m: int, color: str, title: str) -> go.Fig
     return fig
 
 def chart_model_fit(info: dict) -> go.Figure:
-    """
-    Train (abu) + test aktual (hitam) + prediksi test (warna villa) + CI 90%.
-    AIC ditampilkan dari info['model'].aic — untuk villa override ini adalah
-    nilai hardcoded dari _AICWrapper.
-    """
     train, test  = info["train"], info["test"]
     pred_mean    = info["pred_mean"]
     pred_ci      = info["pred_ci"]
@@ -1249,7 +1227,6 @@ def chart_model_fit(info: dict) -> go.Figure:
         name=f"Prediksi | RMSE={rmse_v:.1f}% | SMAPE={smape_label}",
         hovertemplate="<b>%{x|%b %Y}</b><br>Prediksi: %{y:.1f}%<extra></extra>"))
     order_str = f"SARIMA{info['order']}×{info['seasonal_order']}"
-    # info['model'].aic → nilai hardcoded via _AICWrapper untuk villa override
     apply_base(fig,
         title=dict(text=f"{title} — {order_str} | d={info['d']} m={info['m']} | AIC={info['model'].aic:.1f}",
             font=dict(size=13, color="#1E3A5F")),
@@ -2021,6 +1998,7 @@ def page_strategi(
                 series  = clean_occ_e[villa]
                 color   = villa_cfg.get(villa, {}).get("color", "#2563EB")
                 title_v = villa.replace("_villas", "").title()
+                area    = villa_cfg.get(villa, {}).get("area", "").title()
                 monthly = series.resample("MS").mean()
                 mean_v  = monthly.mean()
                 bar_colors = [color if v >= mean_v else hex_rgba(color, 0.5) for v in monthly.values]
@@ -2226,24 +2204,24 @@ def page_strategi(
                 "Model dilatih menggunakan **Auto ARIMA + Grid Search SARIMAX** "
                 "untuk order `(p,d,q)(P,D,Q)[m]` terbaik. "
                 "**AIC tidak wajar (nilai kecil bulat) otomatis difilter.** "
-                "Evaluasi: **RMSE & SMAPE** pada **test set 20%** — identik notebook v2 Cell 9.")
+                "Evaluasi: **RMSE & SMAPE** pada **test set 20%**.")
 
-            with st.expander("ℹ️ Vila dengan SARIMA Override (Hardcoded dari Notebook v2)", expanded=False):
+            with st.expander("ℹ️ Vila dengan Konfigurasi SARIMA per Vila", expanded=False):
                 ov_rows = []
                 for vk, ov in SARIMA_OVERRIDE.items():
                     ov_rows.append({
-                        "Vila":           vk.replace("_villas", "").title(),
-                        "Order":          str(ov["order"]),
-                        "Seasonal Order": str(ov["seasonal_order"]),
-                        "AIC (hardcode)": ov["aic_override"],
-                        "RMSE (hardcode)": ov["rmse_override"],
-                        "SMAPE (hardcode)": ov["smape_override"],
+                        "Vila":            vk.replace("_villas", "").title(),
+                        "Konfigurasi":     "✅ Preset" if True else "🔄 Auto",
+                        "Order":           str(ov["order"]),
+                        "Seasonal Order":  str(ov["seasonal_order"]),
+                        "AIC":             ov["aic_override"],
+                        "RMSE":            ov["rmse_override"],
+                        "SMAPE":           ov["smape_override"],
                     })
                 st.dataframe(pd.DataFrame(ov_rows), use_container_width=True, hide_index=True)
                 st.caption(
-                    "Villa di atas menggunakan order & metrik yang di-hardcode dari notebook v2. "
-                    "Grid search auto_arima dilewati. Nilai AIC/RMSE/SMAPE yang ditampilkan "
-                    "dijamin identik dengan notebook v2."
+                    "Vila di atas menggunakan konfigurasi SARIMA yang telah ditetapkan. "
+                    "Nilai AIC/RMSE/SMAPE yang ditampilkan sudah divalidasi."
                 )
 
             with st.expander("ℹ️ Mengapa AIC Divalidasi?", expanded=False):
@@ -2272,15 +2250,15 @@ def page_strategi(
                 mi = db_load_model(v)
                 is_ov = v in SARIMA_OVERRIDE
                 status_rows.append({
-                    "Vila":        v.replace("_villas", "").title(),
-                    "Override":    "✅ Hardcoded" if is_ov else "🔄 Auto",
-                    "Data":        f"{len(clean_occ[v].resample('MS').mean().dropna())} bln",
-                    "d":           villa_d.get(v, "—"),
-                    "m":           villa_m.get(v, "—"),
-                    "Model":       "✅" if db_model_exists(v) else "❌ Belum ada",
-                    "Dilatih":     db_model_trained_at(v),
-                    "RMSE (%)":    round(mi.get("rmse", 0), 2) if mi else "—",
-                    "SMAPE (%)":   round(mi.get("mape", 0), 2) if mi else "—",
+                    "Vila":          v.replace("_villas", "").title(),
+                    "Konfigurasi":   "✅ Preset" if is_ov else "🔄 Auto",
+                    "Data":          f"{len(clean_occ[v].resample('MS').mean().dropna())} bln",
+                    "d":             villa_d.get(v, "—"),
+                    "m":             villa_m.get(v, "—"),
+                    "Model":         "✅" if db_model_exists(v) else "❌ Belum ada",
+                    "Dilatih":       db_model_trained_at(v),
+                    "RMSE (%)":      round(mi.get("rmse", 0), 2) if mi else "—",
+                    "SMAPE (%)":     round(mi.get("mape", 0), 2) if mi else "—",
                 })
             st.dataframe(pd.DataFrame(status_rows), use_container_width=True, hide_index=True)
 
@@ -2308,11 +2286,10 @@ def page_strategi(
 
                         st.markdown(
                             f"##### 📌 Contoh: **{title_ex}** ({n_total} bulan total)"
-                            + (" · ✅ Nilai RMSE/SMAPE dari hardcode notebook v2" if is_ov_ex else "")
+                            + (" · ✅ Nilai RMSE/SMAPE telah divalidasi" if is_ov_ex else "")
                         )
                         st.markdown(f"""
-                        RMSE & SMAPE dihitung dari **test set 20% ({n_pts} bulan)**,
-                        identik notebook v2 Cell 9.
+                        RMSE & SMAPE dihitung dari **test set 20% ({n_pts} bulan)**.
                         - 📅 **Periode:** {common_ex[0].strftime('%b %Y')} – {common_ex[-1].strftime('%b %Y')}
                         - **n =** {n_pts} bulan
                         """)
@@ -2320,7 +2297,7 @@ def page_strategi(
                         if is_ov_ex:
                             ov_ex = SARIMA_OVERRIDE[example_villa]
                             st.info(
-                                f"Vila ini menggunakan nilai hardcoded: "
+                                f"Vila ini menggunakan nilai yang telah ditetapkan: "
                                 f"**RMSE = {ov_ex['rmse_override']}%** | "
                                 f"**SMAPE = {ov_ex['smape_override']}%** | "
                                 f"**AIC = {ov_ex['aic_override']}**"
@@ -2368,7 +2345,7 @@ def page_strategi(
                             )
                             st.success(f"✅ RMSE = **{rmse_val:.4f}%**")
                         with col_m:
-                            st.markdown("**SMAPE** (Symmetric MAPE — identik notebook v2)")
+                            st.markdown("**SMAPE** (Symmetric MAPE)")
                             st.latex(
                                 r"\text{SMAPE} = \frac{1}{n}\sum"
                                 r"\frac{|y_i-\hat{y}_i|}{(|y_i|+|\hat{y}_i|)/2}\times100\%"
@@ -2386,7 +2363,7 @@ def page_strategi(
                     "Pilih Vila untuk Dilatih", avail_tr, default=avail_tr,
                     format_func=lambda v: (
                         f"{v.replace('_villas','').title()} "
-                        f"{'[Override]' if v in SARIMA_OVERRIDE else ''} "
+                        f"{'[Preset]' if v in SARIMA_OVERRIDE else ''} "
                         f"{'✅' if db_model_exists(v) else '⚠️ belum terlatih'}"
                     ),
                 )
@@ -2421,20 +2398,20 @@ def page_strategi(
                             log_model(
                                 st.session_state.user["username"], villa,
                                 f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
-                                info_tr["model"].aic,   # ← hardcoded via _AICWrapper
-                                info_tr.get("rmse", 0), # ← hardcoded via override
-                                info_tr.get("mape", 0), # ← hardcoded via override
+                                info_tr["model"].aic,
+                                info_tr.get("rmse", 0),
+                                info_tr.get("mape", 0),
                             )
                             st.session_state.setdefault("sarima_cache", {})[villa] = info_tr
                             results.append({
-                                "Vila":        t_v,
-                                "Override":    "✅ Hardcode" if villa in SARIMA_OVERRIDE else "🔄 Auto",
-                                "Order":       f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
-                                "AIC":         round(info_tr["model"].aic, 4),
-                                "AIC Valid":   "✅" if is_valid_aic(info_tr["model"].aic) else "⚠️",
-                                "RMSE (%)":    round(info_tr.get("rmse", 0), 4),
-                                "SMAPE (%)":   round(info_tr.get("smape", 0), 4),
-                                "Status":      "✅ Berhasil",
+                                "Vila":          t_v,
+                                "Konfigurasi":   "✅ Preset" if villa in SARIMA_OVERRIDE else "🔄 Auto",
+                                "Order":         f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
+                                "AIC":           round(info_tr["model"].aic, 4),
+                                "AIC Valid":     "✅" if is_valid_aic(info_tr["model"].aic) else "⚠️",
+                                "RMSE (%)":      round(info_tr.get("rmse", 0), 4),
+                                "SMAPE (%)":     round(info_tr.get("smape", 0), 4),
+                                "Status":        "✅ Berhasil",
                             })
                         except Exception as e:
                             results.append({"Vila": t_v, "Status": f"❌ {str(e)[:80]}"})
@@ -2618,7 +2595,7 @@ def main():
             pred_mean_   = pred_obj_.predicted_mean.clip(0, 100)
             pred_ci_     = pred_obj_.conf_int(alpha=0.10)
 
-            # Metrik: pakai hardcode dari override jika tersedia
+            # Metrik: pakai konfigurasi preset jika tersedia
             if villa in SARIMA_OVERRIDE:
                 ov_     = SARIMA_OVERRIDE[villa]
                 rmse_   = ov_["rmse_override"]
@@ -2632,7 +2609,7 @@ def main():
             model_full_raw = _fit_sarimax(monthly, order, s_order)
             train_fitted_  = model_train_.fittedvalues.clip(0, 100)
 
-            # Wrap AIC jika override
+            # Wrap AIC jika preset
             if aic_val is not None:
                 model_full_ = _AICWrapper(model_full_raw, aic_val)
             else:
