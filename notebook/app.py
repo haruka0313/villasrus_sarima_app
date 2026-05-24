@@ -279,7 +279,10 @@ def db_delete_villa(villa: str):
 
 # ── Raw Data ──
 def db_save_data(villa: str, dtype: str, filename: str, content: str, rows: int) -> bool:
-    """Simpan atau gabung data. Return True jika merged."""
+    """
+    Simpan atau gabung data. Return True jika merged.
+    Identik notebook v2: deduplikasi berdasarkan kolom tanggal yang terdeteksi otomatis.
+    """
     sb = get_supabase()
     existing = sb.table("raw_data").select("content").eq("villa", villa).eq("data_type", dtype).execute()
 
@@ -287,8 +290,15 @@ def db_save_data(villa: str, dtype: str, filename: str, content: str, rows: int)
         try:
             df_old = _parse_csv(existing.data[0]["content"])
             df_new = _parse_csv(content)
-            date_col = df_old.columns[0]
-            df_merged = pd.concat([df_old, df_new]).drop_duplicates(subset=[date_col])
+            # Deteksi kolom tanggal secara eksplisit (notebook v2 Cell 2 & 3)
+            date_col_old = _find_col(df_old, ["date", "tanggal", "tgl"]) or df_old.columns[0]
+            date_col_new = _find_col(df_new, ["date", "tanggal", "tgl"]) or df_new.columns[0]
+            # Normalisasi nama kolom tanggal agar merge konsisten
+            df_old = df_old.rename(columns={date_col_old: "__date__"})
+            df_new = df_new.rename(columns={date_col_new: "__date__"})
+            df_merged = pd.concat([df_old, df_new]).drop_duplicates(subset=["__date__"])
+            # Kembalikan nama kolom asli
+            df_merged = df_merged.rename(columns={"__date__": date_col_old})
             merged_content = df_merged.to_csv(index=False)
             total_rows = len(df_merged)
         except Exception:
@@ -469,6 +479,12 @@ def _parse_occupancy(series: pd.Series) -> pd.Series:
     return result.clip(0, 100)
 
 def clean_occupancy(df: pd.DataFrame) -> pd.Series:
+    """
+    Identik notebook v2 Cell 3:
+    - Parse tanggal fleksibel (dayfirst, strip prefix hari)
+    - Prioritas kolom occupancy: exact match → keyword (exclude 'occupancy total') → fallback
+    - Reindex harian penuh + interpolasi time (limit=7) + ffill + bfill + clip(0,100)
+    """
     df = df.copy()
     date_col = _find_col(df, ["date", "tanggal", "tgl"]) or df.columns[0]
     df[date_col] = _parse_dates(df[date_col])
@@ -514,6 +530,13 @@ def clean_occupancy(df: pd.DataFrame) -> pd.Series:
     return series
 
 def clean_revenue(df: pd.DataFrame) -> pd.Series:
+    """
+    Identik notebook v2 Cell 2:
+    - Parse tanggal fleksibel
+    - Cari kolom revenue berdasarkan keyword (room_revenue, daily_revenue, ADR, RevPAR, dst)
+    - Resample ke bulanan dengan SUM (bukan mean) agar total revenue akurat
+    - Filter baris revenue <= 0 (data tidak valid)
+    """
     df = df.copy()
     date_col = _find_col(df, ["date", "tanggal", "tgl"]) or df.columns[0]
     df[date_col] = _parse_dates(df[date_col])
@@ -535,17 +558,24 @@ def clean_revenue(df: pd.DataFrame) -> pd.Series:
 
 @st.cache_data(show_spinner=False)
 def load_all_data(_villa_cfg_json: str) -> tuple[dict, dict]:
+    """
+    Identik notebook v2 Cell 2 & Cell 3:
+    - Occupancy diambil HANYA dari dtype='occupancy'
+    - Financial diambil HANYA dari dtype='financial'
+    - Keduanya tidak saling tumpang-tindih
+    """
     villa_cfg = json.loads(_villa_cfg_json)
     occ_dict, fin_dict = {}, {}
     for villa in villa_cfg:
-        for dtype in ("financial", "occupancy"):
-            df = db_load_data(villa, dtype)
-            if df is not None:
-                try:
-                    occ_dict[villa] = clean_occupancy(df)
-                    break
-                except Exception:
-                    continue
+        # ── Occupancy: hanya dari tipe 'occupancy' (identik notebook v2 Cell 3)
+        df_occ = db_load_data(villa, "occupancy")
+        if df_occ is not None:
+            try:
+                occ_dict[villa] = clean_occupancy(df_occ)
+            except Exception:
+                pass
+
+        # ── Financial: hanya dari tipe 'financial' (identik notebook v2 Cell 2)
         df_fin = db_load_data(villa, "financial")
         if df_fin is not None:
             try:
@@ -562,6 +592,11 @@ def load_all_data(_villa_cfg_json: str) -> tuple[dict, dict]:
 # ══════════════════════════════════════════════════════════════
 
 def adf_test(series: pd.Series) -> dict:
+    """
+    Identik notebook v2 Cell 6:
+    - Augmented Dickey-Fuller dengan autolag='AIC'
+    - Stasioner jika p-value < 0.05
+    """
     res = adfuller(series.dropna(), autolag="AIC")
     stationary = res[1] < 0.05
     return {
@@ -887,6 +922,7 @@ def make_forecast(info: dict) -> dict:
             retry tidak boleh menghasilkan model dengan AIC error code.
     [FIX-C] best_aic threshold retry dinaikkan (best_aic + 10) hanya
             jika kandidat lolos validasi AIC.
+    [FIX-D] fore_mean & fore_ci di-clip(0,100) konsisten setelah retry.
     """
     monthly = info["monthly"]
     order, s_order, d = info["order"], info["seasonal_order"], info["d"]
@@ -913,7 +949,7 @@ def make_forecast(info: dict) -> dict:
 
     fore_obj  = model_full.get_forecast(steps=FORECAST_STEPS)
     fore_mean = fore_obj.predicted_mean.clip(0, 100)
-    fore_ci   = fore_obj.conf_int(alpha=0.10).clip(0, 100)
+    fore_ci   = fore_obj.conf_int(alpha=0.10).clip(0, 100)  # FIX-D: clip konsisten
     is_flat   = fore_mean.std() < FLAT_STD_THRESH
 
     # ── Retry jika flat
@@ -940,8 +976,8 @@ def make_forecast(info: dict) -> dict:
                     continue
 
                 fc       = mc.get_forecast(steps=FORECAST_STEPS)
-                fc_mean  = fc.predicted_mean.clip(0, 100)
-                fc_ci    = fc.conf_int(alpha=0.10).clip(0, 100)
+                fc_mean  = fc.predicted_mean.clip(0, 100)   # FIX-D: clip konsisten
+                fc_ci    = fc.conf_int(alpha=0.10).clip(0, 100)  # FIX-D: clip konsisten
                 std_cand = fc_mean.std()
 
                 # FIX-C: update hanya jika ada variansi DAN AIC valid
@@ -1142,13 +1178,17 @@ def chart_model_fit(info: dict) -> go.Figure:
 
 
 def chart_forecast(info: dict, fore: dict) -> go.Figure:
-    """Identik notebook v2 Cell 11: history + test aktual + fitted test + forecast."""
+    """
+    Identik notebook v2 Cell 11:
+    history (abu) + train_fitted (dotted train) + test aktual (hitam) + fitted test + forecast.
+    """
     monthly      = info["monthly"]
     train, test  = info["train"], info["test"]
     color, title = info["color"], info["title"]
     fore_mean, fore_ci = fore["fore_mean"], fore["fore_ci"]
     is_flat      = fore["is_flat"]
     fore_color   = "#EF4444" if is_flat else color
+    train_fitted = info.get("train_fitted")
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -1159,14 +1199,19 @@ def chart_forecast(info: dict, fore: dict) -> go.Figure:
     fig.add_trace(go.Scatter(x=monthly.index, y=monthly.values,
         line=dict(color="#9CA3AF", width=1.5), name="Historis",
         hovertemplate="<b>%{x|%b %Y}</b><br>Historis: %{y:.1f}%<extra></extra>"))
+    # ── Fitted values pada TRAINING SET (identik notebook v2 Cell 11)
+    if train_fitted is not None and len(train_fitted) > 0:
+        fig.add_trace(go.Scatter(x=train_fitted.index, y=train_fitted.values,
+            line=dict(color=color, width=1.2, dash="dot"), name="Fitted (Train)", opacity=0.5,
+            hovertemplate="<b>%{x|%b %Y}</b><br>Fitted Train: %{y:.1f}%<extra></extra>"))
     if len(test) > 0:
         fig.add_trace(go.Scatter(x=test.index, y=test.values,
             line=dict(color="#111827", width=2), mode="lines+markers",
             marker=dict(size=5), name="Aktual (Test)",
             hovertemplate="<b>%{x|%b %Y}</b><br>Aktual: %{y:.1f}%<extra></extra>"))
     fig.add_trace(go.Scatter(x=info["pred_mean"].index, y=info["pred_mean"].values,
-        line=dict(color=color, width=1.5, dash="dot"), name="Fitted (Test)", opacity=0.7,
-        hovertemplate="<b>%{x|%b %Y}</b><br>Fitted: %{y:.1f}%<extra></extra>"))
+        line=dict(color=color, width=1.5, dash="dashdot"), name="Fitted (Test)", opacity=0.8,
+        hovertemplate="<b>%{x|%b %Y}</b><br>Fitted Test: %{y:.1f}%<extra></extra>"))
     flat_label = " ⚠️ Flat" if is_flat else f" (σ={fore_mean.std():.1f}%)"
     fig.add_trace(go.Scatter(
         x=fore_mean.index, y=fore_mean.values,
@@ -1542,16 +1587,39 @@ def page_manajemen_data(villa_cfg: dict):
                 if not date_col:
                     st.error("❌ Kolom tanggal tidak ditemukan.")
                 else:
-                    n_rows  = len(df_up)
-                    merged  = db_save_data(villa_sel, dtype, uploaded.name, content, n_rows)
-                    info_   = db_data_info(villa_sel, dtype)
-                    log_upload(st.session_state.user["username"], villa_sel, dtype, uploaded.name, n_rows)
-                    load_all_data.clear()
-                    if merged:
-                        st.success(f"✅ Data digabung. Total: **{info_['rows']:,} baris** tersimpan.")
-                    else:
-                        st.success(f"✅ Data baru disimpan: **{n_rows:,} baris**.")
-                    st.info("💡 Latih model di menu **Strategi Hunian & Harga → Train Model**.")
+                    # ── Validasi kolom sesuai tipe (identik notebook v2 Cell 2 & 3) ──
+                    valid_cols = True
+                    if dtype == "occupancy":
+                        occ_found = _find_col(df_up, ["occupancy", "occ", "hunian", "occupied", "booked", "available"])
+                        if not occ_found:
+                            st.error(
+                                "❌ Kolom occupancy tidak ditemukan. "
+                                "Pastikan ada kolom: occupancy, occ, booked, atau available."
+                            )
+                            valid_cols = False
+                    elif dtype == "financial":
+                        rev_found = _find_col(df_up, [
+                            "revenue", "pendapatan", "income", "total", "daily_revenue",
+                            "room_revenue", "gross", "amount", "jumlah", "adr"
+                        ])
+                        if not rev_found:
+                            st.error(
+                                "❌ Kolom revenue tidak ditemukan. "
+                                "Pastikan ada kolom: revenue, room_revenue, daily_revenue, ADR, atau amount."
+                            )
+                            valid_cols = False
+
+                    if valid_cols:
+                        n_rows  = len(df_up)
+                        merged  = db_save_data(villa_sel, dtype, uploaded.name, content, n_rows)
+                        info_   = db_data_info(villa_sel, dtype)
+                        log_upload(st.session_state.user["username"], villa_sel, dtype, uploaded.name, n_rows)
+                        load_all_data.clear()
+                        if merged:
+                            st.success(f"✅ Data digabung. Total: **{info_['rows']:,} baris** tersimpan.")
+                        else:
+                            st.success(f"✅ Data baru disimpan: **{n_rows:,} baris**.")
+                        st.info("💡 Latih model di menu **Strategi Hunian & Harga → Train Model**.")
             except Exception as e:
                 st.error(f"❌ Gagal memproses: {e}")
         elif submit and not uploaded:
