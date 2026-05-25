@@ -2039,12 +2039,10 @@ def page_strategi(
                 m_val   = villa_m.get(villa, 12)
                 mean_occ = monthly.mean()
                 n_months = len(monthly)
-                occ_icon, occ_lbl, _ = status_badge(mean_occ)
-                mq_icon, mq_lbl      = model_quality_badge(info.get("mape", float("nan")) if info else float("nan"))
                 label_exp = (
-                    f"**{title_v}** · {area} · {occ_icon} {occ_lbl} ({mean_occ:.1f}%) · "
-                    f"{n_months} bln · d={d_val} m={m_val}"
-                    + (f" · {mq_icon} {mq_lbl}" if info else "")
+                    f"**{title_v}** · {area} "
+                    f"{n_months} bln"
+                    + (f"" if info else "")
                 )
                 with st.expander(label_exp, expanded=False):
                     c1, c2, c3, c4, c5 = st.columns(5)
@@ -2181,17 +2179,6 @@ def page_strategi(
                             if q  > 0: pts.append(f"**MA({q})**: Koreksi {q} error prediksi sebelumnya")
                             if P > 0 or Q > 0:
                                 pts.append(f"**Seasonal ({P},{D},{Q})[{ms}]**: Pola musiman tiap {ms} bulan")
-                            for pt in pts:
-                                st.markdown(f"- {pt}")
-                            mape_v = info.get("mape", float("nan"))
-                            rmse_v = info.get("rmse", 0)
-                            mq_i, mq_l = model_quality_badge(mape_v)
-                            if not np.isnan(mape_v) and mape_v < 20:
-                                st.success(f"{mq_i} {mq_l} | RMSE={rmse_v:.1f}%")
-                            elif not np.isnan(mape_v) and mape_v < 30:
-                                st.warning(f"{mq_i} {mq_l} | RMSE={rmse_v:.1f}%")
-                            else:
-                                st.error(f"{mq_i} Pertimbangkan retrain atau tambah data historis.")
 
         with tabs[3]:
             section_header("Training Model SARIMA", "🚀")
