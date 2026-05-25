@@ -1520,14 +1520,14 @@ def page_login():
 def page_dashboard(clean_occ: dict, clean_fin: dict, villa_cfg: dict):
     is_admin = st.session_state.user.get("role") == "admin"
     st.markdown(
-        f"<h1 style='color:#1E3A5F;margin-bottom:4px;'>🏠 Dashboard Utama</h1>"
+        f"<h1 style='color:#1E3A5F;margin-bottom:4px;'> Dashboard Utama</h1>"
         f"<p style='color:#6B7280;margin-bottom:20px;'>"
         f"Ringkasan performa seluruh unit vila · {datetime.now().strftime('%d %B %Y, %H:%M')}</p>",
         unsafe_allow_html=True)
     if not clean_occ:
         st.warning("⚠️ Belum ada data vila. Upload data melalui menu **Manajemen Data**.")
         return
-    section_header("Ringkasan Keseluruhan", "📊")
+    section_header("Ringkasan Keseluruhan", "")
     all_means    = [s.resample("MS").mean().mean() for s in clean_occ.values()]
     global_mean  = np.mean(all_means) if all_means else 0
     n_with_model = sum(1 for v in villa_cfg if db_model_exists(v))
@@ -1595,7 +1595,7 @@ def page_dashboard(clean_occ: dict, clean_fin: dict, villa_cfg: dict):
 
 def page_manajemen_data(villa_cfg: dict):
     st.markdown(
-        "<h1 style='color:#1E3A5F;'>📂 Manajemen Data</h1>"
+        "<h1 style='color:#1E3A5F;'> Manajemen Data</h1>"
         "<p style='color:#6B7280;margin-bottom:20px;'>Upload, preview, dan kelola data "
         "ekspor Beds24 untuk setiap unit vila.</p>",
         unsafe_allow_html=True)
@@ -1802,7 +1802,7 @@ def page_strategi(
 ):
     is_admin = st.session_state.user.get("role") == "admin"
     st.markdown(
-        "<h1 style='color:#1E3A5F;'>📊 Strategi Hunian & Harga</h1>"
+        "<h1 style='color:#1E3A5F;'> Strategi Hunian & Harga</h1>"
         "<p style='color:#6B7280;margin-bottom:20px;'>"
         "Prediksi tingkat hunian SARIMA dan analisis keterkaitan harga historis (ADR).</p>",
         unsafe_allow_html=True)
@@ -1829,7 +1829,7 @@ def page_strategi(
                 if is_admin:
                     st.markdown("""
                     ### 🔧 Panduan untuk Admin
-                    1. ✅ **Upload Data Okupansi** → menu **📂 Manajemen Data**
+                    1. ✅ **Upload Data Okupansi** → menu ** Manajemen Data**
                     2. ✅ **Latih Model SARIMA** → tab **🚀 Train Model**
                     3. ✅ **Pilih Vila & Mulai Training**
                     4. ✅ **Refresh Halaman**
@@ -1837,7 +1837,7 @@ def page_strategi(
                 else:
                     st.info("💡 Hubungi administrator untuk melatih model prediksi SARIMA.")
             with col2:
-                st.markdown("### 📊 Status Vila Saat Ini")
+                st.markdown("###  Status Vila Saat Ini")
                 for villa in selected_villas:
                     has_data  = villa in clean_occ
                     has_model = db_model_exists(villa)
@@ -1890,7 +1890,7 @@ def page_strategi(
                 if not fore:
                     continue
                 st.plotly_chart(chart_forecast(info, fore), use_container_width=True)
-                with st.expander(f"📊 Detail Prediksi {info['title']}", expanded=False):
+                with st.expander(f" Detail Prediksi {info['title']}", expanded=False):
                     forecast_df = pd.DataFrame({
                         "Bulan":             fore["fore_mean"].index.strftime("%b %Y"),
                         "Prediksi (%)":      fore["fore_mean"].values.round(1),
@@ -1912,7 +1912,7 @@ def page_strategi(
     def render_harga_tab():
         section_header("Keterkaitan Okupansi & Revenue (ADR)", "💰")
         if not clean_fin:
-            st.info("📂 Data finansial belum diupload.")
+            st.info(" Data finansial belum diupload.")
             return
         fig_sc = chart_scatter_occ_rev(clean_occ, clean_fin, villa_cfg)
         if fig_sc:
@@ -1986,7 +1986,7 @@ def page_strategi(
                 })
             if eda_rows:
                 st.dataframe(pd.DataFrame(eda_rows), use_container_width=True, hide_index=True)
-            section_header("Distribusi Ocupansi Bulanan per Vila", "📊")
+            section_header("Distribusi Ocupansi Bulanan per Vila", "")
             for villa in selected_villas:
                 if villa not in clean_occ_e:
                     continue
@@ -2353,17 +2353,17 @@ def main():
 
         if is_admin:
             nav = st.radio("Navigasi", [
-                "🏠 Dashboard Utama",
-                "📊 Strategi Hunian & Harga",
-                "📂 Manajemen Data",
+                " Dashboard Utama",
+                " Strategi Hunian & Harga",
+                " Manajemen Data",
             ], label_visibility="collapsed")
         else:
             nav = st.radio("Navigasi", [
-                "🏠 Dashboard Utama",
-                "📊 Strategi Hunian & Harga",
+                " Dashboard Utama",
+                " Strategi Hunian & Harga",
             ], label_visibility="collapsed")
 
-        if nav in ["🏠 Dashboard Utama", "📊 Strategi Hunian & Harga"]:
+        if nav in [" Dashboard Utama", " Strategi Hunian & Harga"]:
             st.divider()
             st.markdown(
                 "<div style='font-size:12px;font-weight:600;color:#374151;"
@@ -2392,7 +2392,7 @@ def main():
             "SARIMA Forecasting System<br>PT Bali Cipta Vila Mandiri<br>© 2025</div>",
             unsafe_allow_html=True)
 
-    if nav == "📂 Manajemen Data":
+    if nav == " Manajemen Data":
         if not is_admin:
             st.error("🔒 Akses ditolak. Halaman ini hanya untuk Admin.")
             return
@@ -2402,7 +2402,7 @@ def main():
     with st.spinner("Memuat data..."):
         clean_occ_all, clean_fin_all = load_all_data(json.dumps(villa_cfg, sort_keys=True))
 
-    if nav == "🏠 Dashboard Utama":
+    if nav == " Dashboard Utama":
         page_dashboard(clean_occ_all, clean_fin_all, villa_cfg)
         return
 
