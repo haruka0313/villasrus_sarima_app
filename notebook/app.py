@@ -2041,12 +2041,11 @@ def page_strategi(
                 n_months = len(monthly)
                 label_exp = (
                     f"**{title_v}** · {area} "
-                    f"{n_months} bln"
                     + (f"" if info else "")
                 )
                 with st.expander(label_exp, expanded=False):
                     c1, c2, c3, c4, c5 = st.columns(5)
-                    c1.metric("Rata-rata Ocupansi", f"{mean_occ:.1f}%")
+                    c1.metric("Rata-rata Okupansi", f"{mean_occ:.1f}%")
                     c2.metric("Data Historis",      f"{n_months} bln")
                     c3.metric("d (differencing)",   str(d_val))
                     c4.metric("m (seasonality)",    str(m_val))
@@ -2089,11 +2088,6 @@ def page_strategi(
                                     parts.append(f"Pola musiman **kuat** ({s_str:.1f}%) — siklus m={m_val} bln.")
                                 else:
                                     parts.append(f"Pola musiman **lemah** ({s_str:.1f}%).")
-                                if r_str < 30:
-                                    parts.append(f"Noise rendah ({r_str:.1f}%).")
-                                else:
-                                    parts.append(f"Noise tinggi ({r_str:.1f}%) — ada faktor eksternal.")
-                                st.info("💡 " + "  \n".join(parts))
                             except Exception:
                                 pass
                     with t2:
@@ -2179,6 +2173,17 @@ def page_strategi(
                             if q  > 0: pts.append(f"**MA({q})**: Koreksi {q} error prediksi sebelumnya")
                             if P > 0 or Q > 0:
                                 pts.append(f"**Seasonal ({P},{D},{Q})[{ms}]**: Pola musiman tiap {ms} bulan")
+                            for pt in pts:
+                                st.markdown(f"- {pt}")
+                            mape_v = info.get("mape", float("nan"))
+                            rmse_v = info.get("rmse", 0)
+                            mq_i, mq_l = model_quality_badge(mape_v)
+                            if not np.isnan(mape_v) and mape_v < 20:
+                                st.success(f"{mq_i} {mq_l} | RMSE={rmse_v:.1f}%")
+                            elif not np.isnan(mape_v) and mape_v < 30:
+                                st.warning(f"{mq_i} {mq_l} | RMSE={rmse_v:.1f}%")
+                            else:
+                                st.error(f"{mq_i} Pertimbangkan retrain atau tambah data historis.")
 
         with tabs[3]:
             section_header("Training Model SARIMA", "🚀")
