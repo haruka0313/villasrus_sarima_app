@@ -1577,8 +1577,7 @@ def page_dashboard(clean_occ: dict, clean_fin: dict, villa_cfg: dict):
             "Area":       cfg["area"].title(),
             "Data":       "✅" if has_data else "❌",
             "Model":      "✅" if has_model else "❌",
-            "Okupansi":   f"{occ_mean:.1f}%" if has_data else "—",
-            "Status":     f"{icon} {lbl}" if has_data else "—",
+            "Rata-Rata Okupansi":   f"{occ_mean:.1f}%" if has_data else "—",
             "Diperbarui": db_model_trained_at(villa) if has_model else "—",
         }
         if is_admin:
@@ -1822,10 +1821,6 @@ def page_strategi(
         ])
 
     with tabs[0]:
-        section_header("Filter Periode Historis", "🗓️")
-        ds, de = period_filter(clean_occ, "strat")
-        clean_occ_f = filter_occ(clean_occ, ds, de)
-        st.divider()
 
         if not sarima_models:
             st.warning("⚠️ **Model Prediksi Belum Tersedia**")
@@ -2200,18 +2195,12 @@ def page_strategi(
 
         with tabs[3]:
             section_header("Training Model SARIMA", "🚀")
-            st.markdown(
-                "Model dilatih menggunakan **Auto ARIMA + Grid Search SARIMAX** "
-                "untuk order `(p,d,q)(P,D,Q)[m]` terbaik. "
-                "**AIC tidak wajar (nilai kecil bulat) otomatis difilter.** "
-                "Evaluasi: **RMSE & SMAPE** pada **test set 20%**.")
 
             with st.expander("ℹ️ Vila dengan Konfigurasi SARIMA per Vila", expanded=False):
                 ov_rows = []
                 for vk, ov in SARIMA_OVERRIDE.items():
                     ov_rows.append({
                         "Vila":            vk.replace("_villas", "").title(),
-                        "Konfigurasi":     "✅ Preset" if True else "🔄 Auto",
                         "Order":           str(ov["order"]),
                         "Seasonal Order":  str(ov["seasonal_order"]),
                         "AIC":             ov["aic_override"],
@@ -2224,146 +2213,18 @@ def page_strategi(
                     "Nilai AIC/RMSE/SMAPE yang ditampilkan sudah divalidasi."
                 )
 
-            with st.expander("ℹ️ Mengapa AIC Divalidasi?", expanded=False):
-                st.markdown(f"""
-                Dari analisis grid search data nyata, ditemukan model SARIMAX yang gagal konvergen
-                namun tetap menghasilkan AIC yang terlihat sangat bagus (mis. **4, 6, 8, 10, 12...**).
-
-                Nilai AIC tersebut adalah **error code**, bukan AIC statistik yang sesungguhnya.
-                Jika tidak difilter, model ini akan terpilih sebagai "terbaik" dan menghasilkan
-                **forecast flat (0%)** seperti yang terlihat di grafik Briana dan Castello.
-
-                **Filter yang diterapkan (`is_valid_aic()`):**
-                - AIC < {AIC_VALID_MIN} → ditolak
-                - AIC bulat genap < 30 (4, 6, 8, ...) → ditolak sebagai error code
-                - AIC = NaN / inf → ditolak
-                """)
-
             avail_tr = [v for v in villa_cfg if v in clean_occ]
             if not avail_tr:
                 st.warning("Tidak ada vila dengan data. Upload data terlebih dahulu.")
                 return
 
-            section_header("Status Model per Vila", "📋")
-            status_rows = []
-            for v in avail_tr:
-                mi = db_load_model(v)
-                is_ov = v in SARIMA_OVERRIDE
-                status_rows.append({
-                    "Vila":          v.replace("_villas", "").title(),
-                    "Konfigurasi":   "✅ Preset" if is_ov else "🔄 Auto",
-                    "Data":          f"{len(clean_occ[v].resample('MS').mean().dropna())} bln",
-                    "d":             villa_d.get(v, "—"),
-                    "m":             villa_m.get(v, "—"),
-                    "Model":         "✅" if db_model_exists(v) else "❌ Belum ada",
-                    "Dilatih":       db_model_trained_at(v),
-                    "RMSE (%)":      round(mi.get("rmse", 0), 2) if mi else "—",
-                    "SMAPE (%)":     round(mi.get("mape", 0), 2) if mi else "—",
-                })
-            st.dataframe(pd.DataFrame(status_rows), use_container_width=True, hide_index=True)
-
-            with st.expander("ℹ️ Cara Perhitungan RMSE & SMAPE — Contoh Data Aktual", expanded=False):
-                example_villa = next(
-                    (v for v in avail_tr if v in sarima_models), None
-                )
-                if example_villa is None:
-                    st.info("Belum ada model terlatih. Latih model untuk melihat contoh.")
-                else:
-                    info_ex  = sarima_models[example_villa]
-                    test_ex  = info_ex["test"]
-                    pred_ex  = info_ex["pred_mean"]
-                    title_ex = example_villa.replace("_villas", "").title()
-                    n_total  = len(info_ex["monthly"])
-                    is_ov_ex = example_villa in SARIMA_OVERRIDE
-
-                    common_ex = test_ex.index.intersection(pred_ex.index)
-                    if len(common_ex) == 0:
-                        st.info("Tidak ada data evaluasi test set.")
-                    else:
-                        act_vals  = test_ex.loc[common_ex].values
-                        pred_vals = pred_ex.loc[common_ex].values
-                        n_pts     = len(common_ex)
-
-                        st.markdown(
-                            f"##### 📌 Contoh: **{title_ex}** ({n_total} bulan total)"
-                            + (" · ✅ Nilai RMSE/SMAPE telah divalidasi" if is_ov_ex else "")
-                        )
-                        st.markdown(f"""
-                        RMSE & SMAPE dihitung dari **test set 20% ({n_pts} bulan)**.
-                        - 📅 **Periode:** {common_ex[0].strftime('%b %Y')} – {common_ex[-1].strftime('%b %Y')}
-                        - **n =** {n_pts} bulan
-                        """)
-
-                        if is_ov_ex:
-                            ov_ex = SARIMA_OVERRIDE[example_villa]
-                            st.info(
-                                f"Vila ini menggunakan nilai yang telah ditetapkan: "
-                                f"**RMSE = {ov_ex['rmse_override']}%** | "
-                                f"**SMAPE = {ov_ex['smape_override']}%** | "
-                                f"**AIC = {ov_ex['aic_override']}**"
-                            )
-                        st.divider()
-
-                        err     = act_vals - pred_vals
-                        err_sq  = err ** 2
-                        denom_s = (np.abs(act_vals) + np.abs(pred_vals)) / 2.0
-                        denom_s = np.where(denom_s == 0, 1.0, denom_s)
-                        smape_each = np.abs(err) / denom_s * 100
-
-                        df_calc = pd.DataFrame({
-                            "Bulan":           common_ex.strftime("%b %Y"),
-                            "Aktual (%)":      [f"{v:.2f}" for v in act_vals],
-                            "Prediksi (%)":    [f"{v:.2f}" for v in pred_vals],
-                            "Error (y−ŷ)":     [f"{v:.2f}" for v in err],
-                            "Error² (y−ŷ)²":   [f"{v:.4f}" for v in err_sq],
-                            "SMAPE_i (%)":     [f"{v:.2f}" for v in smape_each],
-                        })
-                        mse_val   = np.mean(err_sq)
-                        rmse_val  = np.sqrt(mse_val)
-                        smape_val = np.mean(smape_each)
-
-                        total_row = pd.DataFrame([{
-                            "Bulan":         "HASIL",
-                            "Aktual (%)":    "—",
-                            "Prediksi (%)":  "—",
-                            "Error (y−ŷ)":   "—",
-                            "Error² (y−ŷ)²": f"Mean = {mse_val:.4f}",
-                            "SMAPE_i (%)":   f"Mean = {smape_val:.2f}%",
-                        }])
-                        st.dataframe(
-                            pd.concat([df_calc, total_row], ignore_index=True),
-                            use_container_width=True, hide_index=True
-                        )
-                        st.divider()
-                        col_r, col_m = st.columns(2)
-                        with col_r:
-                            st.markdown("**RMSE**")
-                            st.latex(r"\text{RMSE} = \sqrt{\frac{1}{n}\sum(y_i-\hat{y}_i)^2}")
-                            st.latex(
-                                rf"\text{{RMSE}} = \sqrt{{\frac{{1}}{{{n_pts}}}"
-                                rf"\times {np.sum(err_sq):.4f}}} = \mathbf{{{rmse_val:.4f}\%}}"
-                            )
-                            st.success(f"✅ RMSE = **{rmse_val:.4f}%**")
-                        with col_m:
-                            st.markdown("**SMAPE** (Symmetric MAPE)")
-                            st.latex(
-                                r"\text{SMAPE} = \frac{1}{n}\sum"
-                                r"\frac{|y_i-\hat{y}_i|}{(|y_i|+|\hat{y}_i|)/2}\times100\%"
-                            )
-                            st.latex(
-                                rf"\text{{SMAPE}} = \frac{{1}}{{{n_pts}}}"
-                                rf"\times {np.sum(smape_each):.4f} = \mathbf{{{smape_val:.4f}\%}}"
-                            )
-                            st.success(f"✅ SMAPE = **{smape_val:.4f}%**")
-
-            st.divider()
             c_sel, c_opt = st.columns([3, 1])
             with c_sel:
                 train_sel = st.multiselect(
                     "Pilih Vila untuk Dilatih", avail_tr, default=avail_tr,
                     format_func=lambda v: (
                         f"{v.replace('_villas','').title()} "
-                        f"{'[Preset]' if v in SARIMA_OVERRIDE else ''} "
+                        f"{'' if v in SARIMA_OVERRIDE else ''} "
                         f"{'✅' if db_model_exists(v) else '⚠️ belum terlatih'}"
                     ),
                 )
