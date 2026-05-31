@@ -51,113 +51,15 @@ MIN_CYCLES             = 2
 ACF_ALPHA              = 0.10
 FALLBACK_M             = 6
 SESSION_DURATION_HOURS = 24 * 30
-TEST_RATIO             = 0.20
 CI_ALPHA               = 0.10
 
-AIC_VALID_MIN = 20.0
+AIC_VALID_MIN      = 20.0
 
-# ══════════════════════════════════════════════════════════════
-# _AICWrapper — wrapper SARIMAX result untuk override nilai AIC
-# ══════════════════════════════════════════════════════════════
-
-class _AICWrapper:
-    """
-    Wrapper SARIMAX fitted result yang meng-override nilai .aic
-    dengan nilai hardcoded dari notebook v2.
-
-    Semua attribute/method lain di-proxy ke model asli
-    sehingga chart_model_fit, chart_residual, make_forecast, dll
-    tetap berjalan normal.
-    """
-    def __init__(self, fitted_model, aic_val: float):
-        # Simpan di __dict__ langsung agar tidak trigger __getattr__
-        object.__setattr__(self, "_model", fitted_model)
-        object.__setattr__(self, "_aic_val", float(aic_val))
-
-    @property
-    def aic(self) -> float:
-        return object.__getattribute__(self, "_aic_val")
-
-    def __getattr__(self, name: str):
-        model = object.__getattribute__(self, "_model")
-        return getattr(model, name)
-
-    def __setattr__(self, name: str, value):
-        if name in ("_model", "_aic_val"):
-            object.__setattr__(self, name, value)
-        else:
-            setattr(object.__getattribute__(self, "_model"), name, value)
-
-
-# ══════════════════════════════════════════════════════════════
-# SARIMA_OVERRIDE — konfigurasi SARIMA per vila
-# ══════════════════════════════════════════════════════════════
-# Format: "villa_key": {
-#     "order": (p,d,q),
-#     "seasonal_order": (P,D,Q,m),
-#     "aic_override": float,
-#     "rmse_override": float,
-#     "smape_override": float,
-# }
-# ──────────────────────────────────────────────────────────────────────
-SARIMA_OVERRIDE: dict = {
-    # AIC=89.3970  RMSE=13.3000  SMAPE=12.5600
-    "briana_villas": {
-        "order":           (1, 1, 1),
-        "seasonal_order":  (1, 1, 2, 7),
-        "aic_override":    89.3970,
-        "rmse_override":   13.3000,
-        "smape_override":  12.5600,
-    },
-    # AIC=102.4907  RMSE=21.9500  SMAPE=28.2000
-    "castello_villas": {
-        "order":           (0, 1, 2),
-        "seasonal_order":  (1, 1, 2, 7),
-        "aic_override":    102.4907,
-        "rmse_override":   21.9500,
-        "smape_override":  28.2000,
-    },
-    # AIC=146.1958  RMSE=29.1400  SMAPE=70.9600
-    "elina_villas": {
-        "order":           (2, 1, 1),
-        "seasonal_order":  (2, 1, 0, 6),
-        "aic_override":    146.1958,
-        "rmse_override":   29.1400,
-        "smape_override":  70.9600,
-    },
-    # AIC=197.2296  RMSE=17.3500  SMAPE=16.3800
-    "isola_villas": {
-        "order":           (1, 1, 1),
-        "seasonal_order":  (2, 1, 1, 4),
-        "aic_override":    197.2296,
-        "rmse_override":   17.3500,
-        "smape_override":  16.3800,
-    },
-    # AIC=87.6602  RMSE=14.0200  SMAPE=14.4200
-    "eindra_villas": {
-        "order":           (0, 0, 1),
-        "seasonal_order":  (0, 1, 1, 12),
-        "aic_override":    87.6602,
-        "rmse_override":   14.0200,
-        "smape_override":  14.4200,
-    },
-    # AIC=90.0111  RMSE=16.5600  SMAPE=14.8700
-    "esha_villas": {
-        "order":           (0, 0, 1),
-        "seasonal_order":  (0, 1, 1, 12),
-        "aic_override":    90.0111,
-        "rmse_override":   16.5600,
-        "smape_override":  14.8700,
-    },
-    # AIC=140.4896  RMSE=14.7900  SMAPE=18.0900
-    "ozamiz_villas": {
-        "order":           (0, 0, 1),
-        "seasonal_order":  (0, 1, 2, 6),
-        "aic_override":    140.4896,
-        "rmse_override":   14.7900,
-        "smape_override":  18.0900,
-    },
-}
+# ── Konstanta seleksi model (sama dengan notebook v3)
+LB_P_MIN           = 0.05   # Ljung-Box: p-value harus DI ATAS nilai ini
+SMAPE_MAX          = 80.0   # Batas atas SMAPE (%) — lebih dari ini → BAD METRIC
+RMSE_MAX           = 40.0   # Batas atas RMSE (%) — lebih dari ini → BAD METRIC
+TOP_N_CANDIDATES   = 10     # Jumlah kandidat teratas (BIC) yang dievaluasi
 
 SESSION_KEY  = "_sess_token"
 MODEL_BUCKET = "sarima-models"
@@ -690,15 +592,6 @@ def adf_test(series: pd.Series) -> dict:
     }
 
 
-M_CANDIDATES_BY_AREA = {
-    "canggu"  : [4, 6, 7, 12],
-    "seminyak": [6, 12],
-    "ubud"    : [4, 6, 12],
-    "uluwatu" : [4, 6, 12],
-    "_default": [4, 6, 7, 12],
-}
-
-
 def detect_m(monthly: pd.Series, area: str = "_default") -> tuple[int, str]:
     """
     Deteksi periode dominan (m) menggunakan periodogram + ACF.
@@ -845,95 +738,39 @@ def _fit_sarimax(data, order, seasonal_order, **kwargs):
 
 
 def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str, villa_key: str = "") -> dict:
+    """
+    Training SARIMA dengan seleksi model berbasis BIC + filter Ljung-Box.
+    Sama persis dengan notebook v3 (Tabel 4.6):
+
+    1. auto_arima (BIC, stepwise) → seed kandidat p, q
+    2. Grid search sekitar seed → semua kandidat di-fit pada data PENUH
+       → diurutkan BIC ascending
+    3. TOP_N_CANDIDATES dievaluasi pada data TRAIN (split 3 bulan):
+       - EXTREME  : prediksi NaN / seluruhnya ≥ 100 → skip
+       - BAD METRIC : SMAPE > SMAPE_MAX atau RMSE > RMSE_MAX → fallback
+       - AUTOCORR : Ljung-Box p ≤ LB_P_MIN → fallback (step-down)
+       - ELIGIBLE  : lolos semua filter → dipilih sebagai model final
+    4. Fallback : kandidat pertama non-ekstrem (meski BAD METRIC / AUTOCORR)
+    5. Emergency: SARIMA(1,d,1)×(0,1,1,m) jika semua kandidat crash
+    """
     monthly      = series.resample("MS").mean().dropna()
     use_seasonal = len(monthly) >= MIN_SEASONAL_TRAIN
 
-    # ══════════════════════════════════════════════════════════
-    # PRESET PATH — villa ada di SARIMA_OVERRIDE
-    # ══════════════════════════════════════════════════════════
-    if villa_key and villa_key in SARIMA_OVERRIDE:
-        ov             = SARIMA_OVERRIDE[villa_key]
-        order          = ov["order"]
-        seasonal_order = ov["seasonal_order"]
-        d              = order[1]
-        m              = seasonal_order[3] if len(seasonal_order) == 4 else m
-        use_seasonal   = m > 1 and len(monthly) >= MIN_SEASONAL_TRAIN
+    # ── Test split: 3 bulan tetap (sama notebook v3)
+    n_test    = 3
+    split_idx = len(monthly) - n_test
+    train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
+    D_val       = 1 if use_seasonal else 0
 
-        # ── Split: test = 3 bulan tetap (bukan 20%), sama dengan notebook v3
-        n_test    = 3
-        split_idx = len(monthly) - n_test
-        train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
-
-        # ── Fit model_train (80%) — untuk chart & pred_mean
-        try:
-            model_train = _fit_sarimax(train, order, seasonal_order)
-        except Exception:
-            # Fallback order jika fit gagal
-            order          = (1, d, 1)
-            seasonal_order = (0, 1, 0, m) if use_seasonal else (0, 0, 0, 0)
-            model_train    = _fit_sarimax(train, order, seasonal_order)
-
-        pred_obj  = model_train.get_forecast(steps=len(test))
-        pred_mean = pred_obj.predicted_mean.clip(0, 100)
-        pred_ci   = pred_obj.conf_int(alpha=CI_ALPHA)
-
-        # ── Fit model_full (100%) — untuk forecast masa depan
-        try:
-            model_full_raw = _fit_sarimax(monthly, order, seasonal_order)
-        except Exception:
-            model_full_raw = model_train
-
-        train_fitted = model_train.fittedvalues.clip(0, 100)
-
-        # ── Metrik dari konfigurasi preset
-        rmse_val  = ov["rmse_override"]
-        smape_val = ov["smape_override"]
-        aic_val   = ov["aic_override"]
-
-        # Wrap model_full agar .aic selalu mengembalikan nilai yang ditetapkan
-        model_full = _AICWrapper(model_full_raw, aic_val)
-
-        return {
-            "model"         : model_full,
-            "model_train"   : model_train,
-            "order"         : order,
-            "seasonal_order": seasonal_order,
-            "train"         : train,
-            "test"          : test,
-            "monthly"       : monthly,
-            "d"             : d,
-            "m"             : m,
-            "use_seasonal"  : use_seasonal,
-            "pred_mean"     : pred_mean,
-            "pred_ci"       : pred_ci,
-            "train_fitted"  : train_fitted,
-            "rmse"          : rmse_val,
-            "mape"          : smape_val,
-            "smape"         : smape_val,
-            "color"         : color,
-            "title"         : title,
-        }
-
-    # ══════════════════════════════════════════════════════════
-    # AUTO ARIMA PATH — villa tidak ada di SARIMA_OVERRIDE
-    # ══════════════════════════════════════════════════════════
-
-    # Step 1: auto_arima (stepwise) → seed p, q
-    # Revisi v3: gunakan BIC (bukan AIC), parameter konservatif sesuai panjang data
+    # ── Step 1: auto_arima (BIC, stepwise) → seed p, q
     try:
         best_sw = auto_arima(
             monthly,
             d                    = d,
             D                    = 1,
             m                    = m if use_seasonal else 1,
-            start_p              = 0,
-            start_q              = 0,
-            start_P              = 0,
-            start_Q              = 0,
-            max_p                = 3,
-            max_q                = 3,
-            max_P                = 2,
-            max_Q                = 2,
+            start_p=0, start_q=0, start_P=0, start_Q=0,
+            max_p=3, max_q=3, max_P=2, max_Q=2,
             seasonal             = use_seasonal,
             stepwise             = True,
             information_criterion= "bic",
@@ -942,100 +779,133 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str, vill
             trace                = False,
         )
         seed_p, _, seed_q = best_sw.order
-        seed_aic = best_sw.aic()
-        if not is_valid_aic(seed_aic):
+        if not is_valid_aic(best_sw.aic()):
             seed_p, seed_q = 1, 1
     except Exception:
         seed_p, seed_q = 1, 1
 
-    # Step 2: Grid search SARIMAX dengan validasi AIC
-    best_aic    = float("inf")
-    best_order  = (seed_p, d, seed_q)
-    best_sorder = (0, 1, 1, m) if use_seasonal else (0, 0, 0, 0)
-    found_valid = False
+    # ── Step 2: Grid search → kandidat diurutkan BIC ascending (model PENUH)
+    p_cands = sorted(set([0, seed_p, max(0, seed_p - 1),
+                          min(3, seed_p + 1), min(3, seed_p + 2)]))
+    q_cands = sorted(set([0, seed_q, max(0, seed_q - 1),
+                          min(3, seed_q + 1), min(3, seed_q + 2)]))
+    P_range = range(0, 3) if use_seasonal else [0]
+    Q_range = range(0, 3) if use_seasonal else [0]
 
-    if use_seasonal:
-        p_candidates = sorted(set([
-            0, seed_p,
-            max(0, seed_p - 1),
-            min(3, seed_p + 1),
-            min(3, seed_p + 2),
-        ]))
-        q_candidates = sorted(set([
-            0, seed_q,
-            max(0, seed_q - 1),
-            min(3, seed_q + 1),
-            min(3, seed_q + 2),
-        ]))
+    all_candidates = []
+    for p_try in p_cands:
+        for q_try in q_cands:
+            for P_try in P_range:
+                for Q_try in Q_range:
+                    try:
+                        curr_order    = (p_try, d, q_try)
+                        curr_seasonal = (P_try, D_val, Q_try, m) if use_seasonal else (0, 0, 0, 0)
+                        m_all = _fit_sarimax(monthly, curr_order, curr_seasonal)
+                        if is_valid_aic(m_all.bic):
+                            all_candidates.append((m_all.bic, curr_order, curr_seasonal))
+                    except Exception:
+                        continue
 
-        for p_try in p_candidates:
-            for q_try in q_candidates:
-                for P_try in range(0, 3):
-                    for Q_try in range(0, 3):
-                        try:
-                            fit = _fit_sarimax(
-                                monthly,
-                                (p_try, d, q_try),
-                                (P_try, 1, Q_try, m),
-                            )
-                            if is_valid_aic(fit.aic) and fit.aic < best_aic:
-                                best_aic    = fit.aic
-                                best_order  = (p_try, d, q_try)
-                                best_sorder = (P_try, 1, Q_try, m)
-                                found_valid = True
-                        except Exception:
-                            continue
+    # Urutkan BIC ascending, ambil TOP_N_CANDIDATES
+    all_candidates.sort(key=lambda x: x[0])
+    top_candidates = all_candidates[:TOP_N_CANDIDATES]
 
-    if not found_valid:
-        best_order  = (1, d, 1)
-        best_sorder = (0, 1, 1, m) if use_seasonal else (0, 0, 0, 0)
+    # Fallback jika grid search kosong total
+    if not top_candidates:
+        top_candidates = [(float("inf"),
+                           (1, d, 1),
+                           (0, D_val, 1, m) if use_seasonal else (0, 0, 0, 0))]
 
-    order          = best_order
-    seasonal_order = best_sorder
+    # ── Step 3: Evaluasi kandidat pada TRAIN, filter LB (notebook Tabel 4.6)
+    lb_lag = max(3, min(m, len(train) // 3))
 
-    if order == (0, 0, 0) and seasonal_order[:3] == (0, 0, 0):
-        order = (1, d, 0)
+    selected_model    = None
+    selected_order    = None
+    selected_seasonal = None
+    model_status      = ""
 
-    # Step 3: Split — test = 3 bulan tetap (bukan 20%), sama dengan notebook v3
-    # Alasan: agar train cukup panjang untuk data <24 bulan
-    n_test    = 3
-    split_idx = len(monthly) - n_test
-    train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
+    for rank, (bic_val, curr_order, curr_seasonal) in enumerate(top_candidates, 1):
+        try:
+            m_tr      = _fit_sarimax(train, curr_order, curr_seasonal)
+            pred_obj  = m_tr.get_forecast(steps=len(test))
+            pred_mean = pred_obj.predicted_mean.clip(0, 100)
 
-    # Step 4: model_train (80%)
+            # Skip prediksi ekstrem
+            if pred_mean.isna().any() or (pred_mean < 0).any() or (pred_mean > 100).all():
+                continue
+
+            rmse_cand  = compute_rmse(test.values, pred_mean.values)
+            smape_cand = compute_smape(test.values, pred_mean.values)
+
+            # Ljung-Box test dengan lag dinamis
+            lb_res = acorr_ljungbox(m_tr.resid.dropna(), lags=[lb_lag], return_df=True)
+            lb_p   = float(lb_res["lb_pvalue"].iloc[0])
+
+            # Simpan kandidat pertama non-ekstrem sebagai fallback
+            if selected_model is None:
+                selected_model    = m_tr
+                selected_order    = curr_order
+                selected_seasonal = curr_seasonal
+                model_status      = f"⚠️ Fallback Rank #{rank} (Metrik/Residual kurang ideal)"
+
+            # Tentukan kelayakan (prioritas cek sama notebook)
+            if smape_cand > SMAPE_MAX or rmse_cand > RMSE_MAX:
+                cand_status = "BAD METRIC"
+            elif lb_p <= LB_P_MIN:
+                cand_status = f"AUTOCORR (LB p={lb_p:.4f} ≤ {LB_P_MIN})"
+            else:
+                cand_status = "ELIGIBLE (Ideal)"
+
+            # Pilih jika ELIGIBLE dan belum ada yang IDEAL
+            if cand_status == "ELIGIBLE (Ideal)" and "IDEAL" not in model_status:
+                selected_model    = m_tr
+                selected_order    = curr_order
+                selected_seasonal = curr_seasonal
+                model_status      = f"✅ IDEAL Rank #{rank} — BIC={bic_val:.2f} LB-p={lb_p:.4f}"
+                break  # Kandidat ideal ditemukan, berhenti
+
+        except Exception:
+            continue
+
+    # ── Emergency fallback jika semua kandidat crash
+    if selected_model is None:
+        curr_order    = (1, d, 1)
+        curr_seasonal = (0, D_val, 1, m) if use_seasonal else (0, 0, 0, 0)
+        try:
+            selected_model = _fit_sarimax(train, curr_order, curr_seasonal)
+        except Exception:
+            selected_model = _fit_sarimax(train, (1, d, 0), (0, 0, 0, 0))
+            curr_order     = (1, d, 0)
+            curr_seasonal  = (0, 0, 0, 0)
+        selected_order    = curr_order
+        selected_seasonal = curr_seasonal
+        model_status      = "🚨 Emergency fallback SARIMA(1,d,1)×(0,1,1,m)"
+
+    # ── Metrik final dari model terpilih
+    final_pred   = selected_model.get_forecast(steps=len(test)).predicted_mean.clip(0, 100)
+    pred_ci      = selected_model.get_forecast(steps=len(test)).conf_int(alpha=CI_ALPHA)
+    rmse_val     = compute_rmse(test.values, final_pred.values)
+    smape_val    = compute_smape(test.values, final_pred.values)
+    train_fitted = selected_model.fittedvalues.clip(0, 100)
+
+    # ── Fit model_full pada seluruh data historis (untuk forecast masa depan)
     try:
-        model_train = _fit_sarimax(train, order, seasonal_order)
+        model_full = _fit_sarimax(monthly, selected_order, selected_seasonal)
     except Exception:
-        order, seasonal_order = (1, d, 1), (0, 1, 0, m if use_seasonal else 0)
-        model_train = _fit_sarimax(train, order, seasonal_order)
-
-    pred_obj  = model_train.get_forecast(steps=len(test))
-    pred_mean = pred_obj.predicted_mean.clip(0, 100)
-    pred_ci   = pred_obj.conf_int(alpha=0.10)
-
-    rmse_val  = compute_rmse(test.values, pred_mean.values)
-    smape_val = compute_smape(test.values, pred_mean.values)
-
-    # Step 5: model_full (100%)
-    try:
-        model_full = _fit_sarimax(monthly, order, seasonal_order)
-    except Exception:
-        model_full = model_train
-
-    train_fitted = model_train.fittedvalues.clip(0, 100)
+        model_full = selected_model
 
     return {
         "model"         : model_full,
-        "model_train"   : model_train,
-        "order"         : order,
-        "seasonal_order": seasonal_order,
+        "model_train"   : selected_model,
+        "order"         : selected_order,
+        "seasonal_order": selected_seasonal,
         "train"         : train,
         "test"          : test,
         "monthly"       : monthly,
         "d"             : d,
         "m"             : m,
         "use_seasonal"  : use_seasonal,
-        "pred_mean"     : pred_mean,
+        "pred_mean"     : final_pred,
         "pred_ci"       : pred_ci,
         "train_fitted"  : train_fitted,
         "rmse"          : rmse_val,
@@ -1043,6 +913,7 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str, vill
         "smape"         : smape_val,
         "color"         : color,
         "title"         : title,
+        "model_status"  : model_status,
     }
 
 
