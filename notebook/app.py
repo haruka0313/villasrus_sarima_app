@@ -49,7 +49,7 @@ MIN_SEASONAL_TRAIN     = 24
 FLAT_STD_THRESH        = 1.5
 MIN_CYCLES             = 2
 ACF_ALPHA              = 0.10
-FALLBACK_M             = 12
+FALLBACK_M             = 6
 SESSION_DURATION_HOURS = 24 * 30
 TEST_RATIO             = 0.20
 CI_ALPHA               = 0.10
@@ -557,6 +557,27 @@ def _parse_occupancy(series: pd.Series) -> pd.Series:
         result = result * 100.0
     return result.clip(0, 100)
 
+# ── Seasonal Median Imputation (sama dengan notebook v3)
+def seasonal_median_impute(series: pd.Series, window_months: int = 1) -> pd.Series:
+    """
+    Isi missing value dengan median occupancy bulan yang sama dari tahun lain.
+    Lebih konservatif daripada interpolasi linear untuk villa yang tutup musiman.
+    """
+    s = series.copy()
+    for idx in s[s.isna()].index:
+        month = idx.month
+        candidates = []
+        for m_off in range(-window_months, window_months + 1):
+            target_month = ((month - 1 + m_off) % 12) + 1
+            same_month = s[(s.index.month == target_month) & ~s.isna()]
+            candidates.extend(same_month.values.tolist())
+        if candidates:
+            s[idx] = np.median(candidates)
+        else:
+            s[idx] = s.median()
+    return s
+
+
 def clean_occupancy(df: pd.DataFrame) -> pd.Series:
     df = df.copy()
     date_col = _find_col(df, ["date", "tanggal", "tgl"]) or df.columns[0]
@@ -592,12 +613,22 @@ def clean_occupancy(df: pd.DataFrame) -> pd.Series:
             series = _parse_occupancy(df[num_cols[0]]).rename("occupancy")
 
     full_idx = pd.date_range(series.index.min(), series.index.max(), freq="D")
-    series   = (series
-                .reindex(full_idx)
-                .interpolate(method="time", limit=7)
-                .ffill()
-                .bfill()
-                .clip(0, 100))
+    series   = series.reindex(full_idx)
+
+    n_missing_before = series.isna().sum()
+    if n_missing_before > 0:
+        # Step 1: interpolasi time limit=3 hari (bukan 7)
+        series = series.interpolate(method="time", limit=3)
+        # Step 2: sisa missing → seasonal median per bulan (sama dengan notebook v3)
+        for idx in series[series.isna()].index:
+            month = idx.month
+            same_month_vals = series[(series.index.month == month) & ~series.isna()]
+            if len(same_month_vals) > 0:
+                series.loc[idx] = same_month_vals.median()
+            else:
+                series.loc[idx] = series.median()
+
+    series = series.clip(0, 100)
     return series
 
 def clean_revenue(df: pd.DataFrame) -> pd.Series:
@@ -669,37 +700,40 @@ M_CANDIDATES_BY_AREA = {
 
 
 def detect_m(monthly: pd.Series, area: str = "_default") -> tuple[int, str]:
-    n = len(monthly)
-    candidates = M_CANDIDATES_BY_AREA.get(area.lower(), M_CANDIDATES_BY_AREA["_default"])
-    candidates = [m for m in candidates if m < n // MIN_CYCLES]
-
-    if not candidates:
-        return FALLBACK_M, "fallback"
+    """
+    Deteksi periode dominan (m) menggunakan periodogram + ACF.
+    Sama persis dengan notebook v3:
+    - MAX_M = max(n // 4, 4) — guard untuk data pendek
+    - Scan semua periode integer, bukan hanya candidates terdaftar
+    """
+    n     = len(monthly)
+    MAX_M = max(n // 4, 4)
 
     freqs, power = scipy_periodogram(monthly.values)
-    valid_mask  = freqs[1:] > 0
-    periods_raw = 1.0 / freqs[1:][valid_mask]
-    power_raw   = power[1:][valid_mask]
+    valid_mask   = freqs[1:] > 0
+    periods_raw  = 1.0 / freqs[1:][valid_mask]
+    power_raw    = power[1:][valid_mask]
 
-    periods_int = np.round(periods_raw).astype(int)
+    periods_int  = np.round(periods_raw).astype(int)
     period_power: dict = {}
     for p, pw in zip(periods_int, power_raw):
         if p not in period_power or pw > period_power[p]:
             period_power[p] = pw
 
-    pgram_m = None
-    best_power = -1
-    for m_cand in candidates:
-        if m_cand in period_power and period_power[m_cand] > best_power:
-            best_power = period_power[m_cand]
-            pgram_m = m_cand
+    sorted_periods = sorted(period_power, key=period_power.get, reverse=True)
 
-    nlags = min(n // 2, 36)
+    pgram_m = None
+    for p in sorted_periods:
+        if 4 <= p <= MAX_M:
+            pgram_m = int(p)
+            break
+
+    nlags = min(n // 2, 24)
     acf_spike_m = None
     try:
         acf_vals, ci = sm_acf(monthly, nlags=nlags, alpha=ACF_ALPHA, fft=True)
-        for lag in sorted(candidates):
-            if lag <= nlags:
+        for lag in range(4, nlags + 1):
+            if 4 <= lag <= MAX_M:
                 outside = (acf_vals[lag] > ci[lag][1] - acf_vals[lag] or
                            acf_vals[lag] < ci[lag][0] - acf_vals[lag])
                 if outside:
@@ -709,11 +743,16 @@ def detect_m(monthly: pd.Series, area: str = "_default") -> tuple[int, str]:
         pass
 
     if pgram_m is not None:
-        return pgram_m, "periodogram"
+        m_final, method = pgram_m, "periodogram"
     elif acf_spike_m is not None:
-        return acf_spike_m, "acf_only"
+        m_final, method = acf_spike_m, "acf_only"
     else:
-        return FALLBACK_M, "fallback"
+        m_final, method = FALLBACK_M, "fallback"
+
+    # Paksa cap ke MAX_M
+    m_final = min(m_final, MAX_M)
+
+    return m_final, method
 
 
 def compute_rmse(actual, predicted) -> float:
@@ -820,8 +859,8 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str, vill
         m              = seasonal_order[3] if len(seasonal_order) == 4 else m
         use_seasonal   = m > 1 and len(monthly) >= MIN_SEASONAL_TRAIN
 
-        # ── Split 80/20
-        n_test    = max(int(len(monthly) * TEST_RATIO), 3)
+        # ── Split: test = 3 bulan tetap (bukan 20%), sama dengan notebook v3
+        n_test    = 3
         split_idx = len(monthly) - n_test
         train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
 
@@ -880,6 +919,7 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str, vill
     # ══════════════════════════════════════════════════════════
 
     # Step 1: auto_arima (stepwise) → seed p, q
+    # Revisi v3: gunakan BIC (bukan AIC), parameter konservatif sesuai panjang data
     try:
         best_sw = auto_arima(
             monthly,
@@ -896,7 +936,7 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str, vill
             max_Q                = 2,
             seasonal             = use_seasonal,
             stepwise             = True,
-            information_criterion= "aic",
+            information_criterion= "bic",
             error_action         = "ignore",
             suppress_warnings    = True,
             trace                = False,
@@ -956,8 +996,9 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str, vill
     if order == (0, 0, 0) and seasonal_order[:3] == (0, 0, 0):
         order = (1, d, 0)
 
-    # Step 3: Split 80/20
-    n_test    = max(int(len(monthly) * 0.20), 3)
+    # Step 3: Split — test = 3 bulan tetap (bukan 20%), sama dengan notebook v3
+    # Alasan: agar train cukup panjang untuk data <24 bulan
+    n_test    = 3
     split_idx = len(monthly) - n_test
     train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
 
@@ -1336,8 +1377,11 @@ def chart_residual(info: dict) -> go.Figure:
     resid = info["model"].resid.dropna()
     color = info["color"]
     title = info["title"]
-    lb     = acorr_ljungbox(resid, lags=[12, 24], return_df=True)
-    p12    = lb.loc[12, "lb_pvalue"]
+    m_val  = info.get("m", FALLBACK_M)
+    # Revisi v3: lag Ljung-Box dinamis max(3, min(m, n//3)) — tidak crash untuk data pendek
+    lb_lag = max(3, min(m_val, len(resid) // 3))
+    lb     = acorr_ljungbox(resid, lags=[lb_lag, lb_lag * 2], return_df=True)
+    p12    = float(lb["lb_pvalue"].iloc[0])
     _, p_n = stats.shapiro(resid[:50])
     fig = make_subplots(rows=1, cols=3,
         subplot_titles=["Residual atas Waktu", "Distribusi Residual", "Q-Q Plot"],
@@ -1363,7 +1407,7 @@ def chart_residual(info: dict) -> go.Figure:
     lb_lbl = "✅ LB OK" if p12 > 0.05 else "⚠️ Autokorelasi"
     n_lbl  = "✅ Normal" if p_n > 0.05 else "⚠️ Non-normal"
     fig.update_layout(
-        title=dict(text=f"{title} — Diagnostik Residual | {lb_lbl} (p12={p12:.3f}) | Shapiro p={p_n:.3f} {n_lbl}",
+        title=dict(text=f"{title} — Diagnostik Residual | {lb_lbl} (p_lag{lb_lag}={p12:.3f}) | Shapiro p={p_n:.3f} {n_lbl}",
             font=dict(size=12, color="#1E3A5F")),
         height=310,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(248,250,252,1)",
@@ -2439,7 +2483,8 @@ def main():
             color_  = villa_cfg.get(villa, {}).get("color", "#2563EB")
             title_  = villa.replace("_villas", "").title()
 
-            n_test_    = max(int(len(monthly) * 0.20), 3)
+            # test = 3 bulan tetap (konsisten dengan notebook v3 dan train_sarima)
+            n_test_    = 3
             split_idx_ = len(monthly) - n_test_
             train_, test_ = monthly.iloc[:split_idx_], monthly.iloc[split_idx_:]
 
