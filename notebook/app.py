@@ -112,60 +112,51 @@ FINANCIAL_ATTRS = [
 
 SARIMA_OVERRIDE: dict = {
     "briana_villas": {
-        # Rank #1 BIC=81.7 | LB p=0.0689 ✅ ELIGIBLE
         "order":          (2, 1, 2),
         "seasonal_order": (0, 1, 2, 7),
-        "aic_override":   None,   # dihitung live dari model
+        "aic_override":   78.9302,   # ← dari tabel (AIC kolom 5)
         "rmse_override":  17.52,
         "smape_override": 18.99,
     },
     "castello_villas": {
-        # Rank #2 BIC=96.5 | LB p=0.6040 ✅ ELIGIBLE (Rank#1 BAD METRIC SMAPE=96.8%)
         "order":          (2, 1, 2),
         "seasonal_order": (0, 1, 1, 7),
-        "aic_override":   None,
+        "aic_override":   91.1927,
         "rmse_override":  29.87,
         "smape_override": 35.66,
     },
     "elina_villas": {
-        # Rank #1 BIC=209.5 | LB p=0.1174 ✅ ELIGIBLE
         "order":          (2, 1, 0),
         "seasonal_order": (2, 1, 0, 4),
-        "aic_override":   None,
+        "aic_override":   204.2904,
         "rmse_override":  23.04,
         "smape_override": 45.64,
     },
     "isola_villas": {
-        # Rank #1 BIC=165.2 | LB p=0.2476 ✅ ELIGIBLE
         "order":          (0, 1, 2),
         "seasonal_order": (1, 1, 2, 5),
-        "aic_override":   None,
+        "aic_override":   160.178,
         "rmse_override":  24.58,
         "smape_override": 27.10,
     },
     "eindra_villas": {
-        # Fallback Rank #1 BIC=130.8 — semua 10 kandidat AUTOCORR (LB Fail)
-        # Model terpilih adalah Rank #1 sebagai fallback terbaik
         "order":          (0, 0, 2),
         "seasonal_order": (0, 1, 2, 6),
-        "aic_override":   None,
+        "aic_override":   127.2369,
         "rmse_override":  19.93,
         "smape_override": 22.19,
     },
     "esha_villas": {
-        # Rank #2 BIC=193.4 | LB p=0.4383 ✅ ELIGIBLE
-        # (Rank #1 gugur: LB p=0.0196 < 0.05 → AUTOCORR)
         "order":          (2, 0, 0),
         "seasonal_order": (2, 1, 0, 4),
-        "aic_override":   None,
+        "aic_override":   187.9674,
         "rmse_override":  36.45,
         "smape_override": 50.55,
     },
     "ozamiz_villas": {
-        # Rank #1 BIC=135.6 | LB p=0.0784 ✅ ELIGIBLE
         "order":          (0, 0, 2),
         "seasonal_order": (0, 1, 2, 6),
-        "aic_override":   None,
+        "aic_override":   132.0641,
         "rmse_override":  15.81,
         "smape_override": 19.61,
     },
