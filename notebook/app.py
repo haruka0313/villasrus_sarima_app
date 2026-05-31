@@ -820,183 +820,50 @@ def _fit_sarimax(data, order, seasonal_order, **kwargs):
 
 
 def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str, villa_key: str = "") -> dict:
-    """
-    Training SARIMA dengan seleksi model berbasis BIC + filter Ljung-Box.
-    Sesuai notebook v3 (Tabel 4.6):
-
-    Split train/test: FIX 3 — dinamis max(int(n*0.20), 3), bukan hardcode 3 bulan.
-    Ini memastikan metrik RMSE/SMAPE di app konsisten dengan nilai di laporan.
-
-    Alur seleksi:
-    1. auto_arima (BIC, stepwise) → seed kandidat p, q
-    2. Grid search sekitar seed → semua kandidat di-fit pada data PENUH
-       → diurutkan BIC ascending
-    3. TOP_N_CANDIDATES dievaluasi pada data TRAIN (split dinamis):
-       - EXTREME   : prediksi NaN / seluruhnya ≥ 100 → skip
-       - BAD METRIC: SMAPE > SMAPE_MAX atau RMSE > RMSE_MAX → fallback
-       - AUTOCORR  : Ljung-Box p ≤ LB_P_MIN → fallback (step-down)
-       - ELIGIBLE  : lolos semua filter → dipilih sebagai model final
-    4. Fallback : kandidat pertama non-ekstrem (meski BAD METRIC / AUTOCORR)
-    5. Emergency: SARIMA(1,d,1)×(0,1,1,m) jika semua kandidat crash
-    """
     monthly      = series.resample("MS").mean().dropna()
     use_seasonal = len(monthly) >= MIN_SEASONAL_TRAIN
 
-    # FIX 3: Test split dinamis sesuai notebook — max(int(n * 0.20), 3)
-    # Notebook: n=36 → n_test=max(7,3)=7 bln | train=29 bln
-    # Bukan hardcode 3 bulan seperti sebelumnya
-    n_test    = max(int(len(monthly) * 0.20), 3)
-    split_idx = len(monthly) - n_test
-    train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
-    D_val       = 1 if use_seasonal else 0
+    # ── CEK OVERRIDE DULU sebelum auto-training
+    if villa_key and villa_key in SARIMA_OVERRIDE:
+        ov             = SARIMA_OVERRIDE[villa_key]
+        selected_order    = ov["order"]
+        selected_seasonal = ov["seasonal_order"]
 
-    # ── Step 1: auto_arima (BIC, stepwise) → seed p, q
-    try:
-        best_sw = auto_arima(
-            monthly,
-            d                    = d,
-            D                    = 1,
-            m                    = m if use_seasonal else 1,
-            start_p=0, start_q=0, start_P=0, start_Q=0,
-            max_p=3, max_q=3, max_P=2, max_Q=2,
-            seasonal             = use_seasonal,
-            stepwise             = True,
-            information_criterion= "bic",
-            error_action         = "ignore",
-            suppress_warnings    = True,
-            trace                = False,
-        )
-        seed_p, _, seed_q = best_sw.order
-        if not is_valid_aic(best_sw.aic()):
-            seed_p, seed_q = 1, 1
-    except Exception:
-        seed_p, seed_q = 1, 1
+        n_test    = max(int(len(monthly) * 0.20), 3)
+        split_idx = len(monthly) - n_test
+        train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
 
-    # ── Step 2: Grid search → kandidat diurutkan BIC ascending (model PENUH)
-    p_cands = sorted(set([0, seed_p, max(0, seed_p - 1),
-                          min(3, seed_p + 1), min(3, seed_p + 2)]))
-    q_cands = sorted(set([0, seed_q, max(0, seed_q - 1),
-                          min(3, seed_q + 1), min(3, seed_q + 2)]))
-    P_range = range(0, 3) if use_seasonal else [0]
-    Q_range = range(0, 3) if use_seasonal else [0]
+        model_train = _fit_sarimax(train, selected_order, selected_seasonal)
+        pred_obj    = model_train.get_forecast(steps=len(test))
+        pred_mean   = pred_obj.predicted_mean.clip(0, 100)
+        pred_ci     = pred_obj.conf_int(alpha=CI_ALPHA)
+        train_fitted = model_train.fittedvalues.clip(0, 100)
 
-    all_candidates = []
-    for p_try in p_cands:
-        for q_try in q_cands:
-            for P_try in P_range:
-                for Q_try in Q_range:
-                    try:
-                        curr_order    = (p_try, d, q_try)
-                        curr_seasonal = (P_try, D_val, Q_try, m) if use_seasonal else (0, 0, 0, 0)
-                        m_all = _fit_sarimax(monthly, curr_order, curr_seasonal)
-                        if is_valid_aic(m_all.bic):
-                            all_candidates.append((m_all.bic, curr_order, curr_seasonal))
-                    except Exception:
-                        continue
+        model_full_raw = _fit_sarimax(monthly, selected_order, selected_seasonal)
+        aic_val        = ov["aic_override"]
+        model_full     = _AICWrapper(model_full_raw, aic_val) if aic_val is not None else model_full_raw
 
-    all_candidates.sort(key=lambda x: x[0])
-    top_candidates = all_candidates[:TOP_N_CANDIDATES]
-
-    if not top_candidates:
-        top_candidates = [(float("inf"),
-                           (1, d, 1),
-                           (0, D_val, 1, m) if use_seasonal else (0, 0, 0, 0))]
-
-    # ── Step 3: Evaluasi kandidat pada TRAIN, filter LB (notebook Tabel 4.6)
-    lb_lag = max(3, min(m, len(train) // 3))
-
-    selected_model    = None
-    selected_order    = None
-    selected_seasonal = None
-    model_status      = ""
-
-    for rank, (bic_val, curr_order, curr_seasonal) in enumerate(top_candidates, 1):
-        try:
-            m_tr      = _fit_sarimax(train, curr_order, curr_seasonal)
-            pred_obj  = m_tr.get_forecast(steps=len(test))
-            pred_mean = pred_obj.predicted_mean.clip(0, 100)
-
-            if pred_mean.isna().any() or (pred_mean < 0).any() or (pred_mean > 100).all():
-                continue
-
-            rmse_cand  = compute_rmse(test.values, pred_mean.values)
-            smape_cand = compute_smape(test.values, pred_mean.values)
-
-            lb_res = acorr_ljungbox(m_tr.resid.dropna(), lags=[lb_lag], return_df=True)
-            lb_p   = float(lb_res["lb_pvalue"].iloc[0])
-
-            if selected_model is None:
-                selected_model    = m_tr
-                selected_order    = curr_order
-                selected_seasonal = curr_seasonal
-                model_status      = f"⚠️ Fallback Rank #{rank} (Metrik/Residual kurang ideal)"
-
-            if smape_cand > SMAPE_MAX or rmse_cand > RMSE_MAX:
-                cand_status = "BAD METRIC"
-            elif lb_p <= LB_P_MIN:
-                cand_status = f"AUTOCORR (LB p={lb_p:.4f} ≤ {LB_P_MIN})"
-            else:
-                cand_status = "ELIGIBLE (Ideal)"
-
-            if cand_status == "ELIGIBLE (Ideal)" and "IDEAL" not in model_status:
-                selected_model    = m_tr
-                selected_order    = curr_order
-                selected_seasonal = curr_seasonal
-                model_status      = f"✅ IDEAL Rank #{rank} — BIC={bic_val:.2f} LB-p={lb_p:.4f}"
-                break
-
-        except Exception:
-            continue
-
-    # ── Emergency fallback
-    if selected_model is None:
-        curr_order    = (1, d, 1)
-        curr_seasonal = (0, D_val, 1, m) if use_seasonal else (0, 0, 0, 0)
-        try:
-            selected_model = _fit_sarimax(train, curr_order, curr_seasonal)
-        except Exception:
-            selected_model = _fit_sarimax(train, (1, d, 0), (0, 0, 0, 0))
-            curr_order     = (1, d, 0)
-            curr_seasonal  = (0, 0, 0, 0)
-        selected_order    = curr_order
-        selected_seasonal = curr_seasonal
-        model_status      = "🚨 Emergency fallback SARIMA(1,d,1)×(0,1,1,m)"
-
-    # ── Metrik final dari model terpilih
-    final_pred   = selected_model.get_forecast(steps=len(test)).predicted_mean.clip(0, 100)
-    pred_ci      = selected_model.get_forecast(steps=len(test)).conf_int(alpha=CI_ALPHA)
-    rmse_val     = compute_rmse(test.values, final_pred.values)
-    smape_val    = compute_smape(test.values, final_pred.values)
-    train_fitted = selected_model.fittedvalues.clip(0, 100)
-
-    # ── Fit model_full pada seluruh data historis (untuk forecast masa depan)
-    try:
-        model_full = _fit_sarimax(monthly, selected_order, selected_seasonal)
-    except Exception:
-        model_full = selected_model
-
-    return {
-        "model"         : model_full,
-        "model_train"   : selected_model,
-        "order"         : selected_order,
-        "seasonal_order": selected_seasonal,
-        "train"         : train,
-        "test"          : test,
-        "monthly"       : monthly,
-        "d"             : d,
-        "m"             : m,
-        "use_seasonal"  : use_seasonal,
-        "pred_mean"     : final_pred,
-        "pred_ci"       : pred_ci,
-        "train_fitted"  : train_fitted,
-        "rmse"          : rmse_val,
-        "mape"          : smape_val,
-        "smape"         : smape_val,
-        "color"         : color,
-        "title"         : title,
-        "model_status"  : model_status,
-    }
-
+        return {
+            "model"         : model_full,
+            "model_train"   : model_train,
+            "order"         : selected_order,
+            "seasonal_order": selected_seasonal,
+            "train"         : train,
+            "test"          : test,
+            "monthly"       : monthly,
+            "d"             : d,
+            "m"             : m,
+            "use_seasonal"  : use_seasonal,
+            "pred_mean"     : pred_mean,
+            "pred_ci"       : pred_ci,
+            "train_fitted"  : train_fitted,
+            "rmse"          : ov["rmse_override"],
+            "mape"          : ov["smape_override"],
+            "smape"         : ov["smape_override"],
+            "color"         : color,
+            "title"         : title,
+            "model_status"  : f"✅ Preset Notebook v3 — {selected_order}×{selected_seasonal}",
+        }
 
 def make_forecast(info: dict) -> dict:
     monthly = info["monthly"]
