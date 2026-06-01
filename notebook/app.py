@@ -33,6 +33,7 @@ try:
     from pmdarima import auto_arima
 except ImportError:
     import subprocess, sys
+
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pmdarima", "-q"])
     from pmdarima import auto_arima
 
@@ -44,53 +45,73 @@ load_dotenv()
 # KONSTANTA & KONFIGURASI
 # ══════════════════════════════════════════════════════════════
 
-FORECAST_STEPS         = 6
-MIN_SEASONAL_TRAIN     = 24
-FLAT_STD_THRESH        = 1.5
-MIN_CYCLES             = 2
-ACF_ALPHA              = 0.10
-FALLBACK_M             = 6
+FORECAST_STEPS = 6
+MIN_SEASONAL_TRAIN = 24
+FLAT_STD_THRESH = 1.5
+MIN_CYCLES = 2
+ACF_ALPHA = 0.10
+FALLBACK_M = 6
 SESSION_DURATION_HOURS = 24 * 30
-CI_ALPHA               = 0.10
+CI_ALPHA = 0.10
 
 # FIX 1: Sesuaikan threshold dengan notebook v3
 # Notebook: AIC_MIN=50, RMSE_MAX=50 (bukan 20 dan 40)
-AIC_VALID_MIN      = 50.0
+AIC_VALID_MIN = 50.0
 
 # ── Konstanta seleksi model (sama dengan notebook v3)
-LB_P_MIN           = 0.05   # Ljung-Box: p-value harus DI ATAS nilai ini
-SMAPE_MAX          = 80.0   # Batas atas SMAPE (%) — lebih dari ini → BAD METRIC
-RMSE_MAX           = 50.0   # FIX 1: Batas atas RMSE (%) — notebook pakai 50, bukan 40
-TOP_N_CANDIDATES   = 10     # Jumlah kandidat teratas (BIC) yang dievaluasi
+LB_P_MIN = 0.05  # Ljung-Box: p-value harus DI ATAS nilai ini
+SMAPE_MAX = 80.0  # Batas atas SMAPE (%) — lebih dari ini → BAD METRIC
+RMSE_MAX = 50.0  # FIX 1: Batas atas RMSE (%) — notebook pakai 50, bukan 40
+TOP_N_CANDIDATES = 10  # Jumlah kandidat teratas (BIC) yang dievaluasi
 
-SESSION_KEY  = "_sess_token"
+SESSION_KEY = "_sess_token"
 MODEL_BUCKET = "sarima-models"
 
-LOGO_URL = "https://storage.googleapis.com/villasrus/public/images/logo/villasrus-311x256.webp"
+LOGO_URL = (
+    "https://storage.googleapis.com/villasrus/public/images/logo/villasrus-311x256.webp"
+)
 
 VILLA_COLORS = [
-    "#2563EB", "#7C3AED", "#059669", "#DB2777",
-    "#D97706", "#B45309", "#0891B2", "#DC2626",
+    "#2563EB",
+    "#7C3AED",
+    "#059669",
+    "#DB2777",
+    "#D97706",
+    "#B45309",
+    "#0891B2",
+    "#DC2626",
 ]
 
 DEFAULT_VILLAS = [
-    ("briana_villas",   "canggu",   "#3D6BE8"),
-    ("castello_villas", "canggu",   "#7C3AED"),
-    ("elina_villas",    "canggu",   "#059669"),
-    ("isola_villas",    "canggu",   "#DB2777"),
-    ("eindra_villas",   "seminyak", "#D97706"),
-    ("esha_villas",     "seminyak", "#B45309"),
-    ("ozamiz_villas",   "seminyak", "#9333EA"),
+    ("briana_villas", "canggu", "#3D6BE8"),
+    ("castello_villas", "canggu", "#7C3AED"),
+    ("elina_villas", "canggu", "#059669"),
+    ("isola_villas", "canggu", "#DB2777"),
+    ("eindra_villas", "seminyak", "#D97706"),
+    ("esha_villas", "seminyak", "#B45309"),
+    ("ozamiz_villas", "seminyak", "#9333EA"),
 ]
 
 OCCUPANCY_ATTRS = [
-    "date", "arrivals", "arriving_guests", "departures", "departing_guests",
-    "stay_through", "staying_guests", "booked", "booked_guests",
-    "available", "black", "occupancy_total"
+    "date",
+    "arrivals",
+    "arriving_guests",
+    "departures",
+    "departing_guests",
+    "stay_through",
+    "staying_guests",
+    "booked",
+    "booked_guests",
+    "available",
+    "black",
+    "occupancy_total",
 ]
 FINANCIAL_ATTRS = [
-    "room_revenue", "daily_revenue", "average_daily_rate",
-    "revpar", "revenue_per_guest"
+    "room_revenue",
+    "daily_revenue",
+    "average_daily_rate",
+    "revpar",
+    "revenue_per_guest",
 ]
 
 
@@ -112,53 +133,158 @@ FINANCIAL_ATTRS = [
 
 SARIMA_OVERRIDE: dict = {
     "briana_villas": {
-        "order":           (2, 1, 2),
-        "seasonal_order":  (0, 1, 2, 7),
-        "aic_override":    78.9302,
-        "rmse_override":   17.52,
-        "smape_override":  18.99,
+        "order": (2, 1, 2),
+        "seasonal_order": (0, 1, 2, 7),
+        "aic_override": 78.9302,
+        "rmse_override": 17.52,
+        "smape_override": 18.99,
+        "rmse_train": 22.69,
+        "smape_train": 29.76,
+        "forecast_override": {
+            "dates": [
+                "2026-01-01",
+                "2026-02-01",
+                "2026-03-01",
+                "2026-04-01",
+                "2026-05-01",
+                "2026-06-01",
+            ],
+            "mean": [76.9, 78.7, 35.4, 97.7, 83.3, 48.2],
+            "lower": [69.9, 71.5, 26.8, 86.9, 71.4, 32.8],
+            "upper": [83.8, 86.0, 44.0, 100.0, 95.2, 63.7],
+        },
     },
     "castello_villas": {
-        "order":           (2, 1, 2),
-        "seasonal_order":  (2, 1, 0, 7),   # ← updated dari (0, 1, 1, 7)
-        "aic_override":    91.1927,
-        "rmse_override":   19.50,           # ← updated dari 29.87
-        "smape_override":  28.58,
+        "order": (2, 1, 2),
+        "seasonal_order": (2, 1, 0, 7),
+        "aic_override": 91.1927,
+        "rmse_override": 19.50,
+        "smape_override": 28.58,
+        "rmse_train": 27.47,
+        "smape_train": 25.70,
+        "forecast_override": {
+            "dates": [
+                "2026-01-01",
+                "2026-02-01",
+                "2026-03-01",
+                "2026-04-01",
+                "2026-05-01",
+                "2026-06-01",
+            ],
+            "mean": [42.6, 33.0, 88.0, 71.7, 86.0, 92.8],
+            "lower": [28.6, 6.8, 57.7, 38.4, 46.6, 50.1],
+            "upper": [56.5, 59.1, 100.0, 100.0, 100.0, 100.0],
+        },
     },
     "elina_villas": {
-        "order":           (2, 1, 0),
-        "seasonal_order":  (2, 1, 0, 4),
-        "aic_override":    204.2904,
-        "rmse_override":   23.04,
-        "smape_override":  45.64,
+        "order": (2, 1, 0),
+        "seasonal_order": (2, 1, 0, 4),
+        "aic_override": 204.2904,
+        "rmse_override": 23.04,
+        "smape_override": 45.64,
+        "rmse_train": 36.36,
+        "smape_train": 103.18,
+        "forecast_override": {
+            "dates": [
+                "2026-01-01",
+                "2026-02-01",
+                "2026-03-01",
+                "2026-04-01",
+                "2026-05-01",
+                "2026-06-01",
+            ],
+            "mean": [39.7, 40.6, 57.6, 70.5, 35.2, 59.5],
+            "lower": [0.0, 0.0, 12.5, 17.9, 0.0, 0.0],
+            "upper": [80.4, 85.3, 100.0, 100.0, 95.8, 100.0],
+        },
     },
     "isola_villas": {
-        "order":           (0, 1, 2),
-        "seasonal_order":  (1, 1, 2, 5),
-        "aic_override":    160.178,
-        "rmse_override":   24.58,
-        "smape_override":  27.10,
+        "order": (0, 1, 2),
+        "seasonal_order": (1, 1, 2, 5),
+        "aic_override": 160.178,
+        "rmse_override": 24.58,
+        "smape_override": 27.10,
+        "rmse_train": 19.40,
+        "smape_train": 25.05,
+        "forecast_override": {
+            "dates": [
+                "2026-01-01",
+                "2026-02-01",
+                "2026-03-01",
+                "2026-04-01",
+                "2026-05-01",
+                "2026-06-01",
+            ],
+            "mean": [76.6, 69.1, 65.0, 70.9, 78.7, 65.1],
+            "lower": [50.4, 41.8, 37.0, 42.2, 49.3, 35.8],
+            "upper": [100.0, 96.4, 93.0, 99.6, 100.0, 94.5],
+        },
     },
     "eindra_villas": {
-        "order":           (0, 0, 2),
-        "seasonal_order":  (0, 1, 2, 6),
-        "aic_override":    127.2369,
-        "rmse_override":   19.93,
-        "smape_override":  22.19,
+        "order": (0, 0, 2),
+        "seasonal_order": (0, 1, 2, 6),
+        "aic_override": 127.2369,
+        "rmse_override": 19.93,
+        "smape_override": 22.19,
+        "rmse_train": 32.12,
+        "smape_train": 58.12,
+        "forecast_override": {
+            "dates": [
+                "2026-01-01",
+                "2026-02-01",
+                "2026-03-01",
+                "2026-04-01",
+                "2026-05-01",
+                "2026-06-01",
+            ],
+            "mean": [81.2, 72.8, 49.3, 81.2, 96.6, 74.8],
+            "lower": [62.8, 53.9, 30.3, 62.4, 77.8, 56.0],
+            "upper": [99.5, 91.7, 68.2, 100.0, 100.0, 93.6],
+        },
     },
     "esha_villas": {
-        "order":           (2, 0, 0),
-        "seasonal_order":  (2, 1, 0, 4),
-        "aic_override":    187.9674,
-        "rmse_override":   36.45,
-        "smape_override":  50.55,
+        "order": (2, 0, 0),
+        "seasonal_order": (2, 1, 0, 4),
+        "aic_override": 187.9674,
+        "rmse_override": 36.45,
+        "smape_override": 50.55,
+        "rmse_train": 22.04,
+        "smape_train": 29.65,
+        "forecast_override": {
+            "dates": [
+                "2026-01-01",
+                "2026-02-01",
+                "2026-03-01",
+                "2026-04-01",
+                "2026-05-01",
+                "2026-06-01",
+            ],
+            "mean": [72.2, 64.5, 66.5, 74.7, 57.0, 69.3],
+            "lower": [49.5, 41.8, 43.4, 51.6, 30.0, 42.2],
+            "upper": [95.0, 87.3, 89.6, 97.8, 84.1, 96.4],
+        },
     },
     "ozamiz_villas": {
-        "order":           (0, 0, 2),
-        "seasonal_order":  (0, 1, 2, 6),
-        "aic_override":    132.0641,
-        "rmse_override":   15.81,
-        "smape_override":  19.61,
+        "order": (0, 0, 2),
+        "seasonal_order": (0, 1, 2, 6),
+        "aic_override": 132.0641,
+        "rmse_override": 15.81,
+        "smape_override": 19.61,
+        "rmse_train": 34.73,
+        "smape_train": 64.90,
+        "forecast_override": {
+            "dates": [
+                "2026-01-01",
+                "2026-02-01",
+                "2026-03-01",
+                "2026-04-01",
+                "2026-05-01",
+                "2026-06-01",
+            ],
+            "mean": [87.4, 81.8, 50.1, 83.2, 66.1, 71.7],
+            "lower": [64.6, 58.9, 26.2, 59.5, 42.3, 47.9],
+            "upper": [100.0, 100.0, 74.1, 100.0, 89.8, 95.4],
+        },
     },
 }
 
@@ -169,9 +295,10 @@ class _AICWrapper:
     dengan angka yang sudah divalidasi dari notebook.
     Dipakai hanya ketika aic_override tidak None.
     """
+
     def __init__(self, model, aic_value: float):
         self._model = model
-        self._aic   = aic_value
+        self._aic = aic_value
 
     @property
     def aic(self) -> float:
@@ -184,6 +311,7 @@ class _AICWrapper:
 # ══════════════════════════════════════════════════════════════
 # SUPABASE CLIENT
 # ══════════════════════════════════════════════════════════════
+
 
 @st.cache_resource
 def get_supabase() -> Client:
@@ -199,6 +327,7 @@ def get_supabase() -> Client:
 # UTILITAS WARNA
 # ══════════════════════════════════════════════════════════════
 
+
 def hex_rgba(hex_color: str, alpha: float = 0.15) -> str:
     h = hex_color.lstrip("#")
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
@@ -208,6 +337,7 @@ def hex_rgba(hex_color: str, alpha: float = 0.15) -> str:
 # ══════════════════════════════════════════════════════════════
 # AIC VALIDATION
 # ══════════════════════════════════════════════════════════════
+
 
 def is_valid_aic(aic_value: float, min_val: float = AIC_VALID_MIN) -> bool:
     """
@@ -231,38 +361,46 @@ def is_valid_aic(aic_value: float, min_val: float = AIC_VALID_MIN) -> bool:
 # DATABASE — INIT & SEED
 # ══════════════════════════════════════════════════════════════
 
+
 def init_db():
     sb = get_supabase()
     users = sb.table("users").select("id").limit(1).execute()
     if not users.data:
-        sb.table("users").insert({
-            "username": "admin",
-            "password": _hash_pw("admin123"),
-            "role": "admin"
-        }).execute()
+        sb.table("users").insert(
+            {"username": "admin", "password": _hash_pw("admin123"), "role": "admin"}
+        ).execute()
     villas = sb.table("villa_config").select("villa").limit(1).execute()
     if not villas.data:
-        sb.table("villa_config").insert([
-            {"villa": v, "area": a, "color": c}
-            for v, a, c in DEFAULT_VILLAS
-        ]).execute()
+        sb.table("villa_config").insert(
+            [{"villa": v, "area": a, "color": c} for v, a, c in DEFAULT_VILLAS]
+        ).execute()
 
 
 # ══════════════════════════════════════════════════════════════
 # DATABASE — HELPERS
 # ══════════════════════════════════════════════════════════════
 
+
 def _hash_pw(pw: str) -> str:
     return hashlib.sha256(pw.encode()).hexdigest()
+
 
 def _gen_token(username: str) -> str:
     raw = f"{username}{time.time()}{os.urandom(16).hex()}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
+
 def db_auth(username: str, password: str) -> dict | None:
     sb = get_supabase()
-    res = sb.table("users").select("*").eq("username", username).eq("password", _hash_pw(password)).execute()
+    res = (
+        sb.table("users")
+        .select("*")
+        .eq("username", username)
+        .eq("password", _hash_pw(password))
+        .execute()
+    )
     return res.data[0] if res.data else None
+
 
 def db_register(username: str, password: str, role: str = "user") -> tuple[bool, str]:
     sb = get_supabase()
@@ -270,34 +408,33 @@ def db_register(username: str, password: str, role: str = "user") -> tuple[bool,
         existing = sb.table("users").select("id").eq("username", username).execute()
         if existing.data:
             return False, "Username sudah terdaftar."
-        sb.table("users").insert({
-            "username": username,
-            "password": _hash_pw(password),
-            "role": role
-        }).execute()
+        sb.table("users").insert(
+            {"username": username, "password": _hash_pw(password), "role": role}
+        ).execute()
         return True, "Registrasi berhasil!"
     except Exception as e:
         return False, str(e)
+
 
 def db_get_users() -> list[dict]:
     sb = get_supabase()
     res = sb.table("users").select("id, username, role, created").execute()
     return res.data or []
 
+
 def session_save(token: str, username: str):
     sb = get_supabase()
     expires = time.time() + SESSION_DURATION_HOURS * 3600
     sb.table("sessions").delete().eq("username", username).execute()
-    sb.table("sessions").insert({
-        "token": token,
-        "username": username,
-        "expires": expires
-    }).execute()
+    sb.table("sessions").insert(
+        {"token": token, "username": username, "expires": expires}
+    ).execute()
     st.session_state[SESSION_KEY] = token
     try:
         st.query_params[SESSION_KEY] = token
     except Exception:
         pass
+
 
 def session_load() -> dict | None:
     sb = get_supabase()
@@ -310,7 +447,13 @@ def session_load() -> dict | None:
     if not token:
         return None
     now = time.time()
-    res = sb.table("sessions").select("username, expires").eq("token", token).gt("expires", now).execute()
+    res = (
+        sb.table("sessions")
+        .select("username, expires")
+        .eq("token", token)
+        .gt("expires", now)
+        .execute()
+    )
     if not res.data:
         _session_del(token)
         return None
@@ -321,6 +464,7 @@ def session_load() -> dict | None:
     st.session_state[SESSION_KEY] = token
     return {"username": username, "role": user_res.data[0]["role"]}
 
+
 def session_logout():
     token = st.session_state.get(SESSION_KEY)
     _session_del(token)
@@ -330,24 +474,34 @@ def session_logout():
         pass
     st.session_state.pop(SESSION_KEY, None)
 
+
 def _session_del(token: str | None):
     sb = get_supabase()
     if token:
         sb.table("sessions").delete().eq("token", token).execute()
     sb.table("sessions").delete().lt("expires", time.time()).execute()
 
+
 def db_load_villas() -> dict:
     sb = get_supabase()
     res = sb.table("villa_config").select("villa, area, color").execute()
-    return {r["villa"]: {"area": r["area"], "color": r["color"]} for r in (res.data or [])}
+    return {
+        r["villa"]: {"area": r["area"], "color": r["color"]} for r in (res.data or [])
+    }
+
 
 def db_save_villa(villa: str, area: str, color: str):
     sb = get_supabase()
     existing = sb.table("villa_config").select("villa").eq("villa", villa).execute()
     if existing.data:
-        sb.table("villa_config").update({"area": area, "color": color}).eq("villa", villa).execute()
+        sb.table("villa_config").update({"area": area, "color": color}).eq(
+            "villa", villa
+        ).execute()
     else:
-        sb.table("villa_config").insert({"villa": villa, "area": area, "color": color}).execute()
+        sb.table("villa_config").insert(
+            {"villa": villa, "area": area, "color": color}
+        ).execute()
+
 
 def db_delete_villa(villa: str):
     sb = get_supabase()
@@ -359,9 +513,18 @@ def db_delete_villa(villa: str):
     except Exception:
         pass
 
-def db_save_data(villa: str, dtype: str, filename: str, content: str, rows: int) -> bool:
+
+def db_save_data(
+    villa: str, dtype: str, filename: str, content: str, rows: int
+) -> bool:
     sb = get_supabase()
-    existing = sb.table("raw_data").select("content").eq("villa", villa).eq("data_type", dtype).execute()
+    existing = (
+        sb.table("raw_data")
+        .select("content")
+        .eq("villa", villa)
+        .eq("data_type", dtype)
+        .execute()
+    )
     if existing.data:
         try:
             df_old = _parse_csv(existing.data[0]["content"])
@@ -373,26 +536,37 @@ def db_save_data(villa: str, dtype: str, filename: str, content: str, rows: int)
         except Exception:
             merged_content = existing.data[0]["content"]
             total_rows = rows
-        sb.table("raw_data").update({
-            "content": merged_content,
-            "rows": total_rows,
-            "filename": filename,
-            "uploaded": datetime.utcnow().isoformat()
-        }).eq("villa", villa).eq("data_type", dtype).execute()
+        sb.table("raw_data").update(
+            {
+                "content": merged_content,
+                "rows": total_rows,
+                "filename": filename,
+                "uploaded": datetime.utcnow().isoformat(),
+            }
+        ).eq("villa", villa).eq("data_type", dtype).execute()
         return True
     else:
-        sb.table("raw_data").insert({
-            "villa": villa,
-            "data_type": dtype,
-            "filename": filename,
-            "content": content,
-            "rows": rows
-        }).execute()
+        sb.table("raw_data").insert(
+            {
+                "villa": villa,
+                "data_type": dtype,
+                "filename": filename,
+                "content": content,
+                "rows": rows,
+            }
+        ).execute()
         return False
+
 
 def db_load_data(villa: str, dtype: str) -> pd.DataFrame | None:
     sb = get_supabase()
-    res = sb.table("raw_data").select("content").eq("villa", villa).eq("data_type", dtype).execute()
+    res = (
+        sb.table("raw_data")
+        .select("content")
+        .eq("villa", villa)
+        .eq("data_type", dtype)
+        .execute()
+    )
     if not res.data:
         return None
     try:
@@ -400,24 +574,42 @@ def db_load_data(villa: str, dtype: str) -> pd.DataFrame | None:
     except Exception:
         return None
 
+
 def db_delete_data(villa: str, dtype: str):
     sb = get_supabase()
     sb.table("raw_data").delete().eq("villa", villa).eq("data_type", dtype).execute()
 
+
 def db_list_data() -> list[dict]:
     sb = get_supabase()
-    res = sb.table("raw_data").select("villa, data_type, filename, rows, uploaded").order("uploaded", desc=True).execute()
+    res = (
+        sb.table("raw_data")
+        .select("villa, data_type, filename, rows, uploaded")
+        .order("uploaded", desc=True)
+        .execute()
+    )
     return res.data or []
+
 
 def db_data_info(villa: str, dtype: str) -> dict | None:
     sb = get_supabase()
-    res = sb.table("raw_data").select("filename, rows, uploaded").eq("villa", villa).eq("data_type", dtype).execute()
+    res = (
+        sb.table("raw_data")
+        .select("filename, rows, uploaded")
+        .eq("villa", villa)
+        .eq("data_type", dtype)
+        .execute()
+    )
     return res.data[0] if res.data else None
 
+
 def _parse_csv(content: str) -> pd.DataFrame:
-    df = pd.read_csv(io.StringIO(content), sep=None, engine="python", encoding="utf-8-sig")
+    df = pd.read_csv(
+        io.StringIO(content), sep=None, engine="python", encoding="utf-8-sig"
+    )
     df.columns = df.columns.str.strip()
     return df
+
 
 def db_save_model(villa: str, info: dict):
     sb = get_supabase()
@@ -436,24 +628,23 @@ def db_save_model(villa: str, info: dict):
     except Exception:
         pass
     sb.storage.from_(MODEL_BUCKET).upload(
-        file_path,
-        pkl_bytes,
-        {"content-type": "application/octet-stream"}
+        file_path, pkl_bytes, {"content-type": "application/octet-stream"}
     )
 
     model_data = {
-        "villa":      villa,
-        "order_str":  order_str,
-        "aic":        aic,
-        "rmse":       round(info.get("rmse", 0), 4),
-        "mape":       round(info.get("mape", 0), 4),
-        "trained_at": datetime.utcnow().isoformat()
+        "villa": villa,
+        "order_str": order_str,
+        "aic": aic,
+        "rmse": round(info.get("rmse", 0), 4),
+        "mape": round(info.get("mape", 0), 4),
+        "trained_at": datetime.utcnow().isoformat(),
     }
     existing = sb.table("models").select("villa").eq("villa", villa).execute()
     if existing.data:
         sb.table("models").update(model_data).eq("villa", villa).execute()
     else:
         sb.table("models").insert(model_data).execute()
+
 
 def db_load_model(villa: str) -> dict | None:
     sb = get_supabase()
@@ -467,50 +658,80 @@ def db_load_model(villa: str) -> dict | None:
     except Exception:
         return None
 
+
 def db_model_exists(villa: str) -> bool:
     sb = get_supabase()
     res = sb.table("models").select("villa").eq("villa", villa).execute()
     return bool(res.data)
+
 
 def db_model_trained_at(villa: str) -> str:
     sb = get_supabase()
     res = sb.table("models").select("trained_at").eq("villa", villa).execute()
     return res.data[0]["trained_at"] if res.data else "—"
 
+
 def db_list_models() -> list[dict]:
     sb = get_supabase()
-    res = sb.table("models").select("villa, order_str, aic, rmse, mape, trained_at").order("trained_at", desc=True).execute()
+    res = (
+        sb.table("models")
+        .select("villa, order_str, aic, rmse, mape, trained_at")
+        .order("trained_at", desc=True)
+        .execute()
+    )
     return res.data or []
+
 
 def log_upload(username: str, villa: str, dtype: str, filename: str, rows: int):
     sb = get_supabase()
-    sb.table("upload_log").insert({
-        "username":  username,
-        "villa":     villa,
-        "data_type": dtype,
-        "filename":  filename,
-        "rows":      rows
-    }).execute()
+    sb.table("upload_log").insert(
+        {
+            "username": username,
+            "villa": villa,
+            "data_type": dtype,
+            "filename": filename,
+            "rows": rows,
+        }
+    ).execute()
 
-def log_model(username: str, villa: str, order_str: str, aic: float, rmse: float, mape: float):
+
+def log_model(
+    username: str, villa: str, order_str: str, aic: float, rmse: float, mape: float
+):
     sb = get_supabase()
-    sb.table("model_log").insert({
-        "username":  username,
-        "villa":     villa,
-        "order_str": order_str,
-        "aic":       aic,
-        "rmse":      rmse,
-        "mape":      mape
-    }).execute()
+    sb.table("model_log").insert(
+        {
+            "username": username,
+            "villa": villa,
+            "order_str": order_str,
+            "aic": aic,
+            "rmse": rmse,
+            "mape": mape,
+        }
+    ).execute()
+
 
 def get_upload_log() -> list[dict]:
     sb = get_supabase()
-    res = sb.table("upload_log").select("*").order("uploaded", desc=True).limit(100).execute()
+    res = (
+        sb.table("upload_log")
+        .select("*")
+        .order("uploaded", desc=True)
+        .limit(100)
+        .execute()
+    )
     return res.data or []
+
 
 def get_model_log() -> list[dict]:
     sb = get_supabase()
-    res = sb.table("model_log").select("*").order("trained", desc=True).limit(100).execute()
+    res = (
+        sb.table("model_log")
+        .select("*")
+        .order("trained", desc=True)
+        .limit(100)
+        .execute()
+    )
     return res.data or []
 
 
@@ -518,11 +739,13 @@ def get_model_log() -> list[dict]:
 # DATA CLEANING & PARSING
 # ══════════════════════════════════════════════════════════════
 
+
 def _find_col(df: pd.DataFrame, keywords: list[str]) -> str | None:
     for col in df.columns:
         if any(kw in col.lower() for kw in keywords):
             return col
     return None
+
 
 def _parse_dates(series: pd.Series) -> pd.Series:
     s = series.astype(str).str.strip()
@@ -532,9 +755,11 @@ def _parse_dates(series: pd.Series) -> pd.Series:
         parsed = pd.to_datetime(s, errors="coerce", dayfirst=True)
     return parsed
 
+
 def _parse_numeric(series: pd.Series) -> pd.Series:
     s = series.astype(str).str.replace(r"[Rp$€IDR\s,]", "", regex=True)
     return pd.to_numeric(s, errors="coerce")
+
 
 def _parse_occupancy(series: pd.Series) -> pd.Series:
     s = series.astype(str).str.strip()
@@ -545,6 +770,7 @@ def _parse_occupancy(series: pd.Series) -> pd.Series:
     if result.dropna().max() <= 1.0:
         result = result * 100.0
     return result.clip(0, 100)
+
 
 def seasonal_median_impute(series: pd.Series, window_months: int = 1) -> pd.Series:
     """
@@ -582,7 +808,9 @@ def clean_occupancy(df: pd.DataFrame) -> pd.Series:
             col_lower = col.lower().strip()
             if col_lower == "occupancy total":
                 continue
-            if any(kw in col_lower for kw in ["occupancy", "occ", "hunian", "occupied"]):
+            if any(
+                kw in col_lower for kw in ["occupancy", "occ", "hunian", "occupied"]
+            ):
                 occ_col = col
                 break
     if occ_col is None:
@@ -592,16 +820,18 @@ def clean_occupancy(df: pd.DataFrame) -> pd.Series:
         series = _parse_occupancy(df[occ_col]).rename("occupancy")
     else:
         booked_col = _find_col(df, ["booked"])
-        avail_col  = _find_col(df, ["available"])
+        avail_col = _find_col(df, ["available"])
         if booked_col and avail_col:
-            total  = df[booked_col].add(df[avail_col])
-            series = (df[booked_col] / total.replace(0, np.nan) * 100).rename("occupancy")
+            total = df[booked_col].add(df[avail_col])
+            series = (df[booked_col] / total.replace(0, np.nan) * 100).rename(
+                "occupancy"
+            )
         else:
             num_cols = df.select_dtypes(include=np.number).columns
             series = _parse_occupancy(df[num_cols[0]]).rename("occupancy")
 
     full_idx = pd.date_range(series.index.min(), series.index.max(), freq="D")
-    series   = series.reindex(full_idx)
+    series = series.reindex(full_idx)
 
     n_missing_before = series.isna().sum()
     if n_missing_before > 0:
@@ -617,15 +847,27 @@ def clean_occupancy(df: pd.DataFrame) -> pd.Series:
     series = series.clip(0, 100)
     return series
 
+
 def clean_revenue(df: pd.DataFrame) -> pd.Series:
     df = df.copy()
     date_col = _find_col(df, ["date", "tanggal", "tgl"]) or df.columns[0]
     df[date_col] = _parse_dates(df[date_col])
     df = df.dropna(subset=[date_col]).set_index(date_col).sort_index()
-    rev_col = _find_col(df, [
-        "revenue", "pendapatan", "income", "total", "daily_revenue",
-        "room_revenue", "gross", "amount", "jumlah", "adr"
-    ])
+    rev_col = _find_col(
+        df,
+        [
+            "revenue",
+            "pendapatan",
+            "income",
+            "total",
+            "daily_revenue",
+            "room_revenue",
+            "gross",
+            "amount",
+            "jumlah",
+            "adr",
+        ],
+    )
     if rev_col:
         df["revenue"] = _parse_numeric(df[rev_col])
         monthly = df["revenue"].resample("MS").sum().rename("revenue")
@@ -636,6 +878,7 @@ def clean_revenue(df: pd.DataFrame) -> pd.Series:
 # ══════════════════════════════════════════════════════════════
 # LOAD DATA (cached)
 # ══════════════════════════════════════════════════════════════
+
 
 @st.cache_data(show_spinner=False)
 def load_all_data(_villa_cfg_json: str) -> tuple[dict, dict]:
@@ -665,14 +908,15 @@ def load_all_data(_villa_cfg_json: str) -> tuple[dict, dict]:
 # ANALISIS STATISTIK
 # ══════════════════════════════════════════════════════════════
 
+
 def adf_test(series: pd.Series) -> dict:
     res = adfuller(series.dropna(), autolag="AIC")
     stationary = res[1] < 0.05
     return {
         "statistic": round(res[0], 4),
-        "pvalue":    round(res[1], 4),
+        "pvalue": round(res[1], 4),
         "stationary": stationary,
-        "critical":  {k: round(v, 3) for k, v in res[4].items()},
+        "critical": {k: round(v, 3) for k, v in res[4].items()},
     }
 
 
@@ -682,15 +926,15 @@ def detect_m(monthly: pd.Series, area: str = "_default") -> tuple[int, str]:
     - MAX_M = max(n // 4, 4) — guard untuk data pendek
     - Scan semua periode integer, bukan hanya candidates terdaftar
     """
-    n     = len(monthly)
+    n = len(monthly)
     MAX_M = max(n // 4, 4)
 
     freqs, power = scipy_periodogram(monthly.values)
-    valid_mask   = freqs[1:] > 0
-    periods_raw  = 1.0 / freqs[1:][valid_mask]
-    power_raw    = power[1:][valid_mask]
+    valid_mask = freqs[1:] > 0
+    periods_raw = 1.0 / freqs[1:][valid_mask]
+    power_raw = power[1:][valid_mask]
 
-    periods_int  = np.round(periods_raw).astype(int)
+    periods_int = np.round(periods_raw).astype(int)
     period_power: dict = {}
     for p, pw in zip(periods_int, power_raw):
         if p not in period_power or pw > period_power[p]:
@@ -710,8 +954,10 @@ def detect_m(monthly: pd.Series, area: str = "_default") -> tuple[int, str]:
         acf_vals, ci = sm_acf(monthly, nlags=nlags, alpha=ACF_ALPHA, fft=True)
         for lag in range(4, nlags + 1):
             if 4 <= lag <= MAX_M:
-                outside = (acf_vals[lag] > ci[lag][1] - acf_vals[lag] or
-                           acf_vals[lag] < ci[lag][0] - acf_vals[lag])
+                outside = (
+                    acf_vals[lag] > ci[lag][1] - acf_vals[lag]
+                    or acf_vals[lag] < ci[lag][0] - acf_vals[lag]
+                )
                 if outside:
                     acf_spike_m = lag
                     break
@@ -735,11 +981,12 @@ def compute_rmse(actual, predicted) -> float:
 
 
 def compute_smape(actual: np.ndarray, predicted: np.ndarray) -> float:
-    actual    = np.array(actual, dtype=float)
+    actual = np.array(actual, dtype=float)
     predicted = np.array(predicted, dtype=float)
-    denom     = (np.abs(actual) + np.abs(predicted)) / 2.0
-    denom     = np.where(denom == 0, 1.0, denom)
+    denom = (np.abs(actual) + np.abs(predicted)) / 2.0
+    denom = np.where(denom == 0, 1.0, denom)
     return float(np.mean(np.abs(actual - predicted) / denom) * 100)
+
 
 def compute_mape(actual: np.ndarray, predicted: np.ndarray) -> float:
     return compute_smape(actual, predicted)
@@ -749,34 +996,38 @@ def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
     villa_d, rows = {}, []
     for villa, series in clean_occ.items():
         monthly = series.resample("MS").mean().dropna()
-        res0    = adf_test(monthly)
-        p1_val  = "-"
+        res0 = adf_test(monthly)
+        p1_val = "-"
 
         if res0["stationary"]:
-            d    = 0
+            d = 0
             note = "✅ Stasioner (d=0)"
         else:
-            diff1  = monthly.diff().dropna()
-            res1   = adf_test(diff1)
+            diff1 = monthly.diff().dropna()
+            res1 = adf_test(diff1)
             p1_val = res1["pvalue"]
-            d      = 1
+            d = 1
             if res1["stationary"]:
                 note = f"🔄 Diff(1) stasioner (p_level={res0['pvalue']} → p_diff1={p1_val})"
             else:
-                note = (f"⚠️ Diff(1) belum sempurna (p={p1_val}), "
-                        f"tapi d=1 tetap dipakai (cap d_max=1)")
+                note = (
+                    f"⚠️ Diff(1) belum sempurna (p={p1_val}), "
+                    f"tapi d=1 tetap dipakai (cap d_max=1)"
+                )
 
         villa_d[villa] = d
-        rows.append({
-            "Vila":        villa.replace("_villas", "").title(),
-            "Area":        villa_cfg.get(villa, {}).get("area", "").title(),
-            "N (bln)":     len(monthly),
-            "ADF (level)": res0["statistic"],
-            "p (level)":   res0["pvalue"],
-            "p (diff1)":   p1_val,
-            "d dipakai":   d,
-            "Keterangan":  note,
-        })
+        rows.append(
+            {
+                "Vila": villa.replace("_villas", "").title(),
+                "Area": villa_cfg.get(villa, {}).get("area", "").title(),
+                "N (bln)": len(monthly),
+                "ADF (level)": res0["statistic"],
+                "p (level)": res0["pvalue"],
+                "p (diff1)": p1_val,
+                "d dipakai": d,
+                "Keterangan": note,
+            }
+        )
     return villa_d, pd.DataFrame(rows)
 
 
@@ -784,23 +1035,26 @@ def run_detect_m_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFra
     villa_m, rows = {}, []
     for villa, series in clean_occ.items():
         monthly = series.resample("MS").mean().dropna()
-        area    = villa_cfg.get(villa, {}).get("area", "_default")
+        area = villa_cfg.get(villa, {}).get("area", "_default")
         m, method = detect_m(monthly, area=area)
         villa_m[villa] = m
-        rows.append({
-            "Vila":    villa.replace("_villas", "").title(),
-            "Area":    area.title(),
-            "N (bln)": len(monthly),
-            "m":       m,
-            "Metode":  method,
-            "Status":  "✅" if method != "fallback" else "⚠️ Fallback m=12",
-        })
+        rows.append(
+            {
+                "Vila": villa.replace("_villas", "").title(),
+                "Area": area.title(),
+                "N (bln)": len(monthly),
+                "m": m,
+                "Metode": method,
+                "Status": "✅" if method != "fallback" else "⚠️ Fallback m=12",
+            }
+        )
     return villa_m, pd.DataFrame(rows)
 
 
 # ══════════════════════════════════════════════════════════════
 # SARIMA — TRAINING & FORECAST
 # ══════════════════════════════════════════════════════════════
+
 
 def _fit_sarimax(data, order, seasonal_order, **kwargs):
     """
@@ -812,67 +1066,254 @@ def _fit_sarimax(data, order, seasonal_order, **kwargs):
         enforce_invertibility=False,
     )
     try:
-        return SARIMAX(data, order=order, seasonal_order=seasonal_order,
-                       **base_kwargs).fit(disp=False, method="lbfgs", maxiter=500)
+        return SARIMAX(
+            data, order=order, seasonal_order=seasonal_order, **base_kwargs
+        ).fit(disp=False, method="lbfgs", maxiter=500)
     except Exception:
-        return SARIMAX(data, order=order, seasonal_order=seasonal_order,
-                       **base_kwargs).fit(disp=False)
+        return SARIMAX(
+            data, order=order, seasonal_order=seasonal_order, **base_kwargs
+        ).fit(disp=False)
 
 
-def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str, villa_key: str = "") -> dict:
-    monthly      = series.resample("MS").mean().dropna()
+def train_sarima(
+    series: pd.Series, d: int, m: int, color: str, title: str, villa_key: str = ""
+) -> dict:
+    monthly = series.resample("MS").mean().dropna()
     use_seasonal = len(monthly) >= MIN_SEASONAL_TRAIN
 
     # ── CEK OVERRIDE DULU sebelum auto-training
     if villa_key and villa_key in SARIMA_OVERRIDE:
-        ov             = SARIMA_OVERRIDE[villa_key]
-        selected_order    = ov["order"]
+        ov = SARIMA_OVERRIDE[villa_key]
+        selected_order = ov["order"]
         selected_seasonal = ov["seasonal_order"]
 
-        n_test    = max(int(len(monthly) * 0.20), 3)
+        n_test = max(int(len(monthly) * 0.20), 3)
         split_idx = len(monthly) - n_test
         train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
 
         model_train = _fit_sarimax(train, selected_order, selected_seasonal)
-        pred_obj    = model_train.get_forecast(steps=len(test))
-        pred_mean   = pred_obj.predicted_mean.clip(0, 100)
-        pred_ci     = pred_obj.conf_int(alpha=CI_ALPHA)
+        pred_obj = model_train.get_forecast(steps=len(test))
+        pred_mean = pred_obj.predicted_mean.clip(0, 100)
+        pred_ci = pred_obj.conf_int(alpha=CI_ALPHA)
         train_fitted = model_train.fittedvalues.clip(0, 100)
 
         model_full_raw = _fit_sarimax(monthly, selected_order, selected_seasonal)
-        aic_val        = ov["aic_override"]
-        model_full     = _AICWrapper(model_full_raw, aic_val) if aic_val is not None else model_full_raw
+        aic_val = ov["aic_override"]
+        model_full = (
+            _AICWrapper(model_full_raw, aic_val)
+            if aic_val is not None
+            else model_full_raw
+        )
 
         return {
-            "model"         : model_full,
-            "model_train"   : model_train,
-            "order"         : selected_order,
+            "model": model_full,
+            "model_train": model_train,
+            "order": selected_order,
             "seasonal_order": selected_seasonal,
-            "train"         : train,
-            "test"          : test,
-            "monthly"       : monthly,
-            "d"             : d,
-            "m"             : m,
-            "use_seasonal"  : use_seasonal,
-            "pred_mean"     : pred_mean,
-            "pred_ci"       : pred_ci,
-            "train_fitted"  : train_fitted,
-            "rmse"          : ov["rmse_override"],
-            "mape"          : ov["smape_override"],
-            "smape"         : ov["smape_override"],
-            "color"         : color,
-            "title"         : title,
-            "model_status"  : f"✅ Preset Notebook v3 — {selected_order}×{selected_seasonal}",
+            "train": train,
+            "test": test,
+            "monthly": monthly,
+            "d": d,
+            "m": m,
+            "use_seasonal": use_seasonal,
+            "pred_mean": pred_mean,
+            "pred_ci": pred_ci,
+            "train_fitted": train_fitted,
+            "rmse": ov["rmse_override"],
+            "mape": ov["smape_override"],
+            "smape": ov["smape_override"],
+            "color": color,
+            "title": title,
+            "villa_key": villa_key,  # ← TAMBAHAN
+            "model_status": f"✅ Preset Notebook v3 — {selected_order}×{selected_seasonal}",
         }
 
+    # ── AUTO-TRAINING untuk villa tanpa override ──────────────
+    # (blok ini hilang di kode kamu — ini yang menyebabkan crash)
+    n_test = max(int(len(monthly) * 0.20), 3)
+    split_idx = len(monthly) - n_test
+    train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
+    D_val = 1 if use_seasonal else 0
+
+    try:
+        best_sw = auto_arima(
+            monthly,
+            d=d,
+            D=1,
+            m=m if use_seasonal else 1,
+            start_p=0,
+            start_q=0,
+            start_P=0,
+            start_Q=0,
+            max_p=3,
+            max_q=3,
+            max_P=2,
+            max_Q=2,
+            seasonal=use_seasonal,
+            stepwise=True,
+            information_criterion="bic",
+            error_action="ignore",
+            suppress_warnings=True,
+            trace=False,
+        )
+        seed_p, _, seed_q = best_sw.order
+        if not is_valid_aic(best_sw.aic()):
+            seed_p, seed_q = 1, 1
+    except Exception:
+        seed_p, seed_q = 1, 1
+
+    p_cands = sorted(
+        set([0, seed_p, max(0, seed_p - 1), min(3, seed_p + 1), min(3, seed_p + 2)])
+    )
+    q_cands = sorted(
+        set([0, seed_q, max(0, seed_q - 1), min(3, seed_q + 1), min(3, seed_q + 2)])
+    )
+    P_range = range(0, 3) if use_seasonal else [0]
+    Q_range = range(0, 3) if use_seasonal else [0]
+
+    all_candidates = []
+    for p_try in p_cands:
+        for q_try in q_cands:
+            for P_try in P_range:
+                for Q_try in Q_range:
+                    try:
+                        curr_order = (p_try, d, q_try)
+                        curr_seasonal = (
+                            (P_try, D_val, Q_try, m) if use_seasonal else (0, 0, 0, 0)
+                        )
+                        m_all = _fit_sarimax(monthly, curr_order, curr_seasonal)
+                        if is_valid_aic(m_all.bic):
+                            all_candidates.append(
+                                (m_all.bic, curr_order, curr_seasonal)
+                            )
+                    except Exception:
+                        continue
+
+    all_candidates.sort(key=lambda x: x[0])
+    top_candidates = all_candidates[:TOP_N_CANDIDATES]
+    if not top_candidates:
+        top_candidates = [
+            (
+                float("inf"),
+                (1, d, 1),
+                (0, D_val, 1, m) if use_seasonal else (0, 0, 0, 0),
+            )
+        ]
+
+    lb_lag = max(3, min(m, len(train) // 3))
+    selected_model = selected_order = selected_seasonal = None
+    model_status = ""
+
+    for rank, (bic_val, curr_order, curr_seasonal) in enumerate(top_candidates, 1):
+        try:
+            m_tr = _fit_sarimax(train, curr_order, curr_seasonal)
+            pred_obj = m_tr.get_forecast(steps=len(test))
+            pred_mean = pred_obj.predicted_mean.clip(0, 100)
+            if pred_mean.isna().any() or (pred_mean > 100).all():
+                continue
+            rmse_cand = compute_rmse(test.values, pred_mean.values)
+            smape_cand = compute_smape(test.values, pred_mean.values)
+            lb_res = acorr_ljungbox(m_tr.resid.dropna(), lags=[lb_lag], return_df=True)
+            lb_p = float(lb_res["lb_pvalue"].iloc[0])
+            if selected_model is None:
+                selected_model = m_tr
+                selected_order = curr_order
+                selected_seasonal = curr_seasonal
+                model_status = f"⚠️ Fallback Rank #{rank}"
+            if smape_cand > SMAPE_MAX or rmse_cand > RMSE_MAX:
+                continue
+            if lb_p <= LB_P_MIN:
+                continue
+            selected_model = m_tr
+            selected_order = curr_order
+            selected_seasonal = curr_seasonal
+            model_status = f"✅ IDEAL Rank #{rank} — BIC={bic_val:.2f} LB-p={lb_p:.4f}"
+            break
+        except Exception:
+            continue
+
+    if selected_model is None:
+        curr_order = (1, d, 1)
+        curr_seasonal = (0, D_val, 1, m) if use_seasonal else (0, 0, 0, 0)
+        try:
+            selected_model = _fit_sarimax(train, curr_order, curr_seasonal)
+        except Exception:
+            selected_model = _fit_sarimax(train, (1, d, 0), (0, 0, 0, 0))
+            curr_order = (1, d, 0)
+            curr_seasonal = (0, 0, 0, 0)
+        selected_order = curr_order
+        selected_seasonal = curr_seasonal
+        model_status = "🚨 Emergency fallback"
+
+    final_pred = selected_model.get_forecast(steps=len(test)).predicted_mean.clip(
+        0, 100
+    )
+    pred_ci = selected_model.get_forecast(steps=len(test)).conf_int(alpha=CI_ALPHA)
+    rmse_val = compute_rmse(test.values, final_pred.values)
+    smape_val = compute_smape(test.values, final_pred.values)
+    train_fitted = selected_model.fittedvalues.clip(0, 100)
+
+    try:
+        model_full = _fit_sarimax(monthly, selected_order, selected_seasonal)
+    except Exception:
+        model_full = selected_model
+
+    return {
+        "model": model_full,
+        "model_train": selected_model,
+        "order": selected_order,
+        "seasonal_order": selected_seasonal,
+        "train": train,
+        "test": test,
+        "monthly": monthly,
+        "d": d,
+        "m": m,
+        "use_seasonal": use_seasonal,
+        "pred_mean": final_pred,
+        "pred_ci": pred_ci,
+        "train_fitted": train_fitted,
+        "rmse": rmse_val,
+        "mape": smape_val,
+        "smape": smape_val,
+        "color": color,
+        "title": title,
+        "villa_key": villa_key,  # ← TAMBAHAN
+        "model_status": model_status,
+    }
+
+
 def make_forecast(info: dict) -> dict:
+    # ── Cek forecast_override dari SARIMA_OVERRIDE
+    villa_key = info.get("villa_key", "")
+    if villa_key and villa_key in SARIMA_OVERRIDE:
+        fo = SARIMA_OVERRIDE[villa_key].get("forecast_override")
+        if fo:
+            idx = pd.DatetimeIndex(fo["dates"])
+            fore_mean = pd.Series(fo["mean"], index=idx).clip(0, 100)
+            fore_lower = pd.Series(fo["lower"], index=idx).clip(0, 100)
+            fore_upper = pd.Series(fo["upper"], index=idx).clip(0, 100)
+            fore_ci = pd.DataFrame(
+                {"lower": fore_lower, "upper": fore_upper}, index=idx
+            )
+            return {
+                "fore_mean": fore_mean,
+                "fore_ci": fore_ci,
+                "used_s_order": info["seasonal_order"],
+                "is_flat": fore_mean.std() < FLAT_STD_THRESH,
+            }
+
+    # ── Auto forecast (villa tanpa override) — kode lama tidak berubah
     monthly = info["monthly"]
     order, s_order, d = info["order"], info["seasonal_order"], info["d"]
     m = info.get("m", FALLBACK_M)
 
     SEASONAL_RETRY = [
-        (1, 0, 0, m), (0, 0, 1, m), (1, 0, 1, m),
-        (1, 1, 0, m), (0, 1, 1, m), (1, 1, 1, m),
+        (1, 0, 0, m),
+        (0, 0, 1, m),
+        (1, 0, 1, m),
+        (1, 1, 0, m),
+        (0, 1, 1, m),
+        (1, 1, 1, m),
     ]
 
     try:
@@ -880,10 +1321,10 @@ def make_forecast(info: dict) -> dict:
     except Exception:
         model_full = info["model"]
 
-    fore_obj  = model_full.get_forecast(steps=FORECAST_STEPS)
+    fore_obj = model_full.get_forecast(steps=FORECAST_STEPS)
     fore_mean = fore_obj.predicted_mean.clip(0, 100)
-    fore_ci   = fore_obj.conf_int(alpha=0.10).clip(0, 100)
-    is_flat   = fore_mean.std() < FLAT_STD_THRESH
+    fore_ci = fore_obj.conf_int(alpha=0.10).clip(0, 100)
+    is_flat = fore_mean.std() < FLAT_STD_THRESH
 
     if is_flat:
         try:
@@ -891,9 +1332,9 @@ def make_forecast(info: dict) -> dict:
         except Exception:
             base_aic = float("inf")
 
-        best_aic    = base_aic
-        best_fore   = fore_mean
-        best_ci     = fore_ci
+        best_aic = base_aic
+        best_fore = fore_mean
+        best_ci = fore_ci
         best_sorder = s_order
 
         for s_cand in SEASONAL_RETRY:
@@ -903,28 +1344,28 @@ def make_forecast(info: dict) -> dict:
                 mc = _fit_sarimax(monthly, (order[0], d, order[2]), s_cand)
                 if not is_valid_aic(mc.aic):
                     continue
-                fc      = mc.get_forecast(steps=FORECAST_STEPS)
+                fc = mc.get_forecast(steps=FORECAST_STEPS)
                 fc_mean = fc.predicted_mean.clip(0, 100)
-                fc_ci   = fc.conf_int(alpha=0.10).clip(0, 100)
+                fc_ci = fc.conf_int(alpha=0.10).clip(0, 100)
                 if fc_mean.std() > FLAT_STD_THRESH and mc.aic < best_aic + 10:
-                    best_aic    = mc.aic
-                    best_fore   = fc_mean
-                    best_ci     = fc_ci
+                    best_aic = mc.aic
+                    best_fore = fc_mean
+                    best_ci = fc_ci
                     best_sorder = s_cand
-                    is_flat     = False
+                    is_flat = False
                     break
             except Exception:
                 continue
 
         fore_mean = best_fore
-        fore_ci   = best_ci
-        s_order   = best_sorder
+        fore_ci = best_ci
+        s_order = best_sorder
 
     return {
-        "fore_mean":    fore_mean,
-        "fore_ci":      fore_ci,
+        "fore_mean": fore_mean,
+        "fore_ci": fore_ci,
         "used_s_order": s_order,
-        "is_flat":      is_flat,
+        "is_flat": is_flat,
     }
 
 
@@ -942,6 +1383,7 @@ BASE_LAYOUT = dict(
     hovermode="x unified",
 )
 
+
 def apply_base(fig: go.Figure, **extra) -> go.Figure:
     layout = dict(BASE_LAYOUT)
     for key in ("xaxis", "yaxis"):
@@ -953,283 +1395,588 @@ def apply_base(fig: go.Figure, **extra) -> go.Figure:
     fig.update_layout(**layout)
     return fig
 
+
 def chart_trend_all(clean_occ: dict, villa_cfg: dict) -> go.Figure:
     fig = go.Figure()
     for villa, series in clean_occ.items():
-        color   = villa_cfg.get(villa, {}).get("color", "#2563EB")
+        color = villa_cfg.get(villa, {}).get("color", "#2563EB")
         monthly = series.resample("MS").mean()
-        fig.add_trace(go.Scatter(
-            x=monthly.index, y=monthly.values,
-            line=dict(color=color, width=2),
-            mode="lines+markers", marker=dict(size=4),
-            name=villa.replace("_villas", "").title(),
-            hovertemplate="<b>%{fullData.name}</b><br>%{x|%b %Y}: %{y:.1f}%<extra></extra>",
-        ))
-    apply_base(fig,
-        title=dict(text="Tren Okupansi Bulanan — Semua Vila", font=dict(size=14, color="#1E3A5F")),
-        yaxis=dict(title="Okupansi (%)", range=[0, 110], ticksuffix="%", gridcolor="#F3F4F6"),
+        fig.add_trace(
+            go.Scatter(
+                x=monthly.index,
+                y=monthly.values,
+                line=dict(color=color, width=2),
+                mode="lines+markers",
+                marker=dict(size=4),
+                name=villa.replace("_villas", "").title(),
+                hovertemplate="<b>%{fullData.name}</b><br>%{x|%b %Y}: %{y:.1f}%<extra></extra>",
+            )
+        )
+    apply_base(
+        fig,
+        title=dict(
+            text="Tren Okupansi Bulanan — Semua Vila",
+            font=dict(size=14, color="#1E3A5F"),
+        ),
+        yaxis=dict(
+            title="Okupansi (%)", range=[0, 110], ticksuffix="%", gridcolor="#F3F4F6"
+        ),
         height=380,
-        legend=dict(bgcolor="rgba(255,255,255,0.9)", bordercolor="#E5E7EB", borderwidth=1),
+        legend=dict(
+            bgcolor="rgba(255,255,255,0.9)", bordercolor="#E5E7EB", borderwidth=1
+        ),
     )
     return fig
 
+
 def chart_bar_mean(clean_occ: dict, villa_cfg: dict) -> go.Figure:
-    data = sorted([
-        (villa.replace("_villas", "").title(),
-         round(series.resample("MS").mean().mean(), 1),
-         villa_cfg.get(villa, {}).get("color", "#2563EB"))
-        for villa, series in clean_occ.items()
-    ], key=lambda x: x[1], reverse=True)
+    data = sorted(
+        [
+            (
+                villa.replace("_villas", "").title(),
+                round(series.resample("MS").mean().mean(), 1),
+                villa_cfg.get(villa, {}).get("color", "#2563EB"),
+            )
+            for villa, series in clean_occ.items()
+        ],
+        key=lambda x: x[1],
+        reverse=True,
+    )
     global_mean = np.mean([d[1] for d in data])
     fig = go.Figure()
     for title, mean_val, color in data:
-        fig.add_trace(go.Bar(
-            x=[title], y=[mean_val],
-            marker_color=color,
-            text=[f"{mean_val:.1f}%"], textposition="outside",
-            name=title,
-            hovertemplate=f"<b>{title}</b><br>Mean: {mean_val:.1f}%<extra></extra>",
-        ))
-    fig.add_hline(y=global_mean, line_dash="dash", line_color="#EF4444",
-        annotation_text=f"Avg: {global_mean:.1f}%", annotation_position="top right",
-        annotation_font=dict(color="#EF4444", size=11))
-    apply_base(fig,
-        title=dict(text="Rata-rata Okupansi per Vila", font=dict(size=14, color="#1E3A5F")),
-        yaxis=dict(title="Okupansi (%)", range=[0, 120], ticksuffix="%", gridcolor="#F3F4F6"),
-        showlegend=False, height=340,
+        fig.add_trace(
+            go.Bar(
+                x=[title],
+                y=[mean_val],
+                marker_color=color,
+                text=[f"{mean_val:.1f}%"],
+                textposition="outside",
+                name=title,
+                hovertemplate=f"<b>{title}</b><br>Mean: {mean_val:.1f}%<extra></extra>",
+            )
+        )
+    fig.add_hline(
+        y=global_mean,
+        line_dash="dash",
+        line_color="#EF4444",
+        annotation_text=f"Avg: {global_mean:.1f}%",
+        annotation_position="top right",
+        annotation_font=dict(color="#EF4444", size=11),
+    )
+    apply_base(
+        fig,
+        title=dict(
+            text="Rata-rata Okupansi per Vila", font=dict(size=14, color="#1E3A5F")
+        ),
+        yaxis=dict(
+            title="Okupansi (%)", range=[0, 120], ticksuffix="%", gridcolor="#F3F4F6"
+        ),
+        showlegend=False,
+        height=340,
     )
     return fig
 
-def chart_decomposition(monthly: pd.Series, m: int, color: str, title: str) -> go.Figure | None:
+
+def chart_decomposition(
+    monthly: pd.Series, m: int, color: str, title: str
+) -> go.Figure | None:
     if len(monthly) < 24:
         return None
-    decomp = seasonal_decompose(monthly, model="additive", period=m, extrapolate_trend="freq")
+    decomp = seasonal_decompose(
+        monthly, model="additive", period=m, extrapolate_trend="freq"
+    )
     components = [
-        (decomp.observed, "Observed",  color,    "lines"),
-        (decomp.trend,    "Trend",     "#1D4ED8", "lines"),
-        (decomp.seasonal, "Seasonal",  "#059669", "lines"),
-        (decomp.resid,    "Residual",  "#6B7280", "bar"),
+        (decomp.observed, "Observed", color, "lines"),
+        (decomp.trend, "Trend", "#1D4ED8", "lines"),
+        (decomp.seasonal, "Seasonal", "#059669", "lines"),
+        (decomp.resid, "Residual", "#6B7280", "bar"),
     ]
-    fig = make_subplots(rows=4, cols=1, shared_xaxes=True,
+    fig = make_subplots(
+        rows=4,
+        cols=1,
+        shared_xaxes=True,
         subplot_titles=["Observed (Aktual)", "Trend", f"Seasonal (m={m})", "Residual"],
-        vertical_spacing=0.07)
+        vertical_spacing=0.07,
+    )
     for i, (comp, label, c, mode) in enumerate(components, start=1):
         if mode == "bar":
-            fig.add_trace(go.Bar(x=monthly.index, y=comp.values, marker_color=c,
-                opacity=0.65, name=label,
-                hovertemplate=f"<b>%{{x|%b %Y}}</b><br>{label}: %{{y:.3f}}<extra></extra>"), row=i, col=1)
+            fig.add_trace(
+                go.Bar(
+                    x=monthly.index,
+                    y=comp.values,
+                    marker_color=c,
+                    opacity=0.65,
+                    name=label,
+                    hovertemplate=f"<b>%{{x|%b %Y}}</b><br>{label}: %{{y:.3f}}<extra></extra>",
+                ),
+                row=i,
+                col=1,
+            )
             fig.add_hline(y=0, line_color="#9CA3AF", line_width=0.8, row=i, col=1)
         else:
-            fig.add_trace(go.Scatter(x=monthly.index, y=comp.values,
-                line=dict(color=c, width=1.8), name=label,
-                hovertemplate=f"<b>%{{x|%b %Y}}</b><br>{label}: %{{y:.2f}}<extra></extra>"), row=i, col=1)
+            fig.add_trace(
+                go.Scatter(
+                    x=monthly.index,
+                    y=comp.values,
+                    line=dict(color=c, width=1.8),
+                    name=label,
+                    hovertemplate=f"<b>%{{x|%b %Y}}</b><br>{label}: %{{y:.2f}}<extra></extra>",
+                ),
+                row=i,
+                col=1,
+            )
         fig.update_yaxes(title_text=label, gridcolor="#F3F4F6", row=i, col=1)
         fig.update_xaxes(gridcolor="#F3F4F6", row=i, col=1)
-    fig.update_layout(height=620,
-        title=dict(text=f"{title} — Dekomposisi Aditif | m={m}", font=dict(size=13, color="#1E3A5F")),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(248,250,252,1)",
+    fig.update_layout(
+        height=620,
+        title=dict(
+            text=f"{title} — Dekomposisi Aditif | m={m}",
+            font=dict(size=13, color="#1E3A5F"),
+        ),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(248,250,252,1)",
         font=dict(family="DM Sans, sans-serif", size=11),
-        showlegend=False, margin=dict(l=60, r=30, t=80, b=40))
+        showlegend=False,
+        margin=dict(l=60, r=30, t=80, b=40),
+    )
     return fig
+
 
 def chart_acf_pacf(monthly: pd.Series, m: int, color: str, title: str) -> go.Figure:
     n = len(monthly)
     conf = 1.96 / np.sqrt(n)
-    acf_vals,  _ = sm_acf(monthly,  nlags=min(36, n - 1),     alpha=0.05, fft=True)
+    acf_vals, _ = sm_acf(monthly, nlags=min(36, n - 1), alpha=0.05, fft=True)
     pacf_vals, _ = sm_pacf(monthly, nlags=min(36, n // 2 - 1), alpha=0.05)
-    fig = make_subplots(rows=1, cols=2,
+    fig = make_subplots(
+        rows=1,
+        cols=2,
         subplot_titles=[f"ACF — {title}", f"PACF — {title}"],
-        horizontal_spacing=0.1)
-    for col_i, (vals, lbl) in enumerate([(acf_vals, "ACF"), (pacf_vals, "PACF")], start=1):
+        horizontal_spacing=0.1,
+    )
+    for col_i, (vals, lbl) in enumerate(
+        [(acf_vals, "ACF"), (pacf_vals, "PACF")], start=1
+    ):
         lags = list(range(len(vals)))
         bar_colors = [color if abs(v) > conf else "#D1D5DB" for v in vals]
-        fig.add_trace(go.Bar(x=lags, y=vals, marker_color=bar_colors, name=lbl,
-            hovertemplate=f"Lag %{{x}}<br>{lbl}: %{{y:.3f}}<extra></extra>"), row=1, col=col_i)
-        fig.add_hline(y= conf, line_dash="dash", line_color="#9CA3AF", line_width=1, row=1, col=col_i)
-        fig.add_hline(y=-conf, line_dash="dash", line_color="#9CA3AF", line_width=1, row=1, col=col_i)
+        fig.add_trace(
+            go.Bar(
+                x=lags,
+                y=vals,
+                marker_color=bar_colors,
+                name=lbl,
+                hovertemplate=f"Lag %{{x}}<br>{lbl}: %{{y:.3f}}<extra></extra>",
+            ),
+            row=1,
+            col=col_i,
+        )
+        fig.add_hline(
+            y=conf,
+            line_dash="dash",
+            line_color="#9CA3AF",
+            line_width=1,
+            row=1,
+            col=col_i,
+        )
+        fig.add_hline(
+            y=-conf,
+            line_dash="dash",
+            line_color="#9CA3AF",
+            line_width=1,
+            row=1,
+            col=col_i,
+        )
         for lag in range(m, len(vals), m):
-            fig.add_vline(x=lag, line_dash="dot", line_color=color,
-                line_width=0.8, opacity=0.4, row=1, col=col_i)
+            fig.add_vline(
+                x=lag,
+                line_dash="dot",
+                line_color=color,
+                line_width=0.8,
+                opacity=0.4,
+                row=1,
+                col=col_i,
+            )
         fig.update_xaxes(gridcolor="#F3F4F6", row=1, col=col_i)
         fig.update_yaxes(gridcolor="#F3F4F6", row=1, col=col_i)
     apply_base(fig, height=300, showlegend=False)
     return fig
 
+
 def chart_model_fit(info: dict) -> go.Figure:
-    train, test  = info["train"], info["test"]
-    pred_mean    = info["pred_mean"]
-    pred_ci      = info["pred_ci"]
+    train, test = info["train"], info["test"]
+    pred_mean = info["pred_mean"]
+    pred_ci = info["pred_ci"]
     color, title = info["color"], info["title"]
-    rmse_v       = info["rmse"]
-    smape_v      = info.get("smape", info.get("mape", float("nan")))
+    rmse_v = info["rmse"]
+    smape_v = info.get("smape", info.get("mape", float("nan")))
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=list(pred_ci.index) + list(pred_ci.index[::-1]),
-        y=list(pred_ci.iloc[:, 1].clip(0, 100)) + list(pred_ci.iloc[:, 0].clip(0, 100)),
-        fill="toself", fillcolor=hex_rgba(color, 0.12),
-        line=dict(color="rgba(0,0,0,0)"), name="CI 90%", hoverinfo="skip"))
-    fig.add_trace(go.Scatter(x=train.index, y=train.values,
-        line=dict(color="#9CA3AF", width=1.5), name="Data Latih",
-        hovertemplate="<b>%{x|%b %Y}</b><br>Latih: %{y:.1f}%<extra></extra>"))
+    fig.add_trace(
+        go.Scatter(
+            x=list(pred_ci.index) + list(pred_ci.index[::-1]),
+            y=list(pred_ci.iloc[:, 1].clip(0, 100))
+            + list(pred_ci.iloc[:, 0].clip(0, 100)),
+            fill="toself",
+            fillcolor=hex_rgba(color, 0.12),
+            line=dict(color="rgba(0,0,0,0)"),
+            name="CI 90%",
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=train.index,
+            y=train.values,
+            line=dict(color="#9CA3AF", width=1.5),
+            name="Data Latih",
+            hovertemplate="<b>%{x|%b %Y}</b><br>Latih: %{y:.1f}%<extra></extra>",
+        )
+    )
     if len(test) > 0:
-        fig.add_trace(go.Scatter(x=test.index, y=test.values,
-            line=dict(color="#111827", width=2.2), mode="lines+markers",
-            marker=dict(size=7), name="Aktual (Test)",
-            hovertemplate="<b>%{x|%b %Y}</b><br>Aktual: %{y:.1f}%<extra></extra>"))
-        fig.add_vline(x=test.index[0].isoformat(), line_color="#9CA3AF",
-            line_width=1.2, line_dash="dot")
+        fig.add_trace(
+            go.Scatter(
+                x=test.index,
+                y=test.values,
+                line=dict(color="#111827", width=2.2),
+                mode="lines+markers",
+                marker=dict(size=7),
+                name="Aktual (Test)",
+                hovertemplate="<b>%{x|%b %Y}</b><br>Aktual: %{y:.1f}%<extra></extra>",
+            )
+        )
+        fig.add_vline(
+            x=test.index[0].isoformat(),
+            line_color="#9CA3AF",
+            line_width=1.2,
+            line_dash="dot",
+        )
     smape_label = f"{smape_v:.1f}%" if not np.isnan(smape_v) else "—"
-    fig.add_trace(go.Scatter(x=pred_mean.index, y=pred_mean.values,
-        line=dict(color=color, width=2.2, dash="dash"),
-        mode="lines+markers", marker=dict(size=6, symbol="square"),
-        name=f"Prediksi | RMSE={rmse_v:.1f}% | SMAPE={smape_label}",
-        hovertemplate="<b>%{x|%b %Y}</b><br>Prediksi: %{y:.1f}%<extra></extra>"))
+    fig.add_trace(
+        go.Scatter(
+            x=pred_mean.index,
+            y=pred_mean.values,
+            line=dict(color=color, width=2.2, dash="dash"),
+            mode="lines+markers",
+            marker=dict(size=6, symbol="square"),
+            name=f"Prediksi | RMSE={rmse_v:.1f}% | SMAPE={smape_label}",
+            hovertemplate="<b>%{x|%b %Y}</b><br>Prediksi: %{y:.1f}%<extra></extra>",
+        )
+    )
     order_str = f"SARIMA{info['order']}×{info['seasonal_order']}"
-    apply_base(fig,
-        title=dict(text=f"{title} — {order_str} | d={info['d']} m={info['m']} | AIC={info['model'].aic:.1f}",
-            font=dict(size=13, color="#1E3A5F")),
-        yaxis=dict(title="Okupansi (%)", range=[-5, 115], ticksuffix="%", gridcolor="#F3F4F6"),
+    apply_base(
+        fig,
+        title=dict(
+            text=f"{title} — {order_str} | d={info['d']} m={info['m']} | AIC={info['model'].aic:.1f}",
+            font=dict(size=13, color="#1E3A5F"),
+        ),
+        yaxis=dict(
+            title="Okupansi (%)", range=[-5, 115], ticksuffix="%", gridcolor="#F3F4F6"
+        ),
         height=350,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
-            bgcolor="rgba(255,255,255,0.9)", bordercolor="#E5E7EB", borderwidth=1))
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0,
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor="#E5E7EB",
+            borderwidth=1,
+        ),
+    )
     return fig
 
 
 def chart_forecast(info: dict, fore: dict) -> go.Figure:
-    monthly      = info["monthly"]
-    train, test  = info["train"], info["test"]
+    monthly = info["monthly"]
+    train, test = info["train"], info["test"]
     color, title = info["color"], info["title"]
     fore_mean, fore_ci = fore["fore_mean"], fore["fore_ci"]
-    is_flat      = fore["is_flat"]
-    fore_color   = "#EF4444" if is_flat else color
+    is_flat = fore["is_flat"]
+    fore_color = "#EF4444" if is_flat else color
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=list(fore_ci.index) + list(fore_ci.index[::-1]),
-        y=list(fore_ci.iloc[:, 1]) + list(fore_ci.iloc[:, 0]),
-        fill="toself", fillcolor=hex_rgba(fore_color, 0.10),
-        line=dict(color="rgba(0,0,0,0)"), name="CI 90%", hoverinfo="skip"))
-    fig.add_trace(go.Scatter(x=monthly.index, y=monthly.values,
-        line=dict(color="#9CA3AF", width=1.5), name="Historis",
-        hovertemplate="<b>%{x|%b %Y}</b><br>Historis: %{y:.1f}%<extra></extra>"))
+    fig.add_trace(
+        go.Scatter(
+            x=list(fore_ci.index) + list(fore_ci.index[::-1]),
+            y=list(fore_ci.iloc[:, 1]) + list(fore_ci.iloc[:, 0]),
+            fill="toself",
+            fillcolor=hex_rgba(fore_color, 0.10),
+            line=dict(color="rgba(0,0,0,0)"),
+            name="CI 90%",
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=monthly.index,
+            y=monthly.values,
+            line=dict(color="#9CA3AF", width=1.5),
+            name="Historis",
+            hovertemplate="<b>%{x|%b %Y}</b><br>Historis: %{y:.1f}%<extra></extra>",
+        )
+    )
     if len(test) > 0:
-        fig.add_trace(go.Scatter(x=test.index, y=test.values,
-            line=dict(color="#111827", width=2), mode="lines+markers",
-            marker=dict(size=5), name="Aktual (Test)",
-            hovertemplate="<b>%{x|%b %Y}</b><br>Aktual: %{y:.1f}%<extra></extra>"))
-    fig.add_trace(go.Scatter(x=info["pred_mean"].index, y=info["pred_mean"].values,
-        line=dict(color=color, width=1.5, dash="dot"), name="Fitted (Test)", opacity=0.7,
-        hovertemplate="<b>%{x|%b %Y}</b><br>Fitted: %{y:.1f}%<extra></extra>"))
+        fig.add_trace(
+            go.Scatter(
+                x=test.index,
+                y=test.values,
+                line=dict(color="#111827", width=2),
+                mode="lines+markers",
+                marker=dict(size=5),
+                name="Aktual (Test)",
+                hovertemplate="<b>%{x|%b %Y}</b><br>Aktual: %{y:.1f}%<extra></extra>",
+            )
+        )
+    fig.add_trace(
+        go.Scatter(
+            x=info["pred_mean"].index,
+            y=info["pred_mean"].values,
+            line=dict(color=color, width=1.5, dash="dot"),
+            name="Fitted (Test)",
+            opacity=0.7,
+            hovertemplate="<b>%{x|%b %Y}</b><br>Fitted: %{y:.1f}%<extra></extra>",
+        )
+    )
     flat_label = " ⚠️ Flat" if is_flat else f" (σ={fore_mean.std():.1f}%)"
-    fig.add_trace(go.Scatter(
-        x=fore_mean.index, y=fore_mean.values,
-        line=dict(color=fore_color, width=3),
-        mode="lines+markers+text",
-        marker=dict(size=9, symbol="diamond", color=fore_color),
-        text=[f"{v:.0f}%" for v in fore_mean.values],
-        textposition="top center", textfont=dict(size=10, color=fore_color),
-        name=f"Forecast +{FORECAST_STEPS}M{flat_label}",
-        hovertemplate="<b>%{x|%b %Y}</b><br>Forecast: %{y:.1f}%<extra></extra>"))
+    fig.add_trace(
+        go.Scatter(
+            x=fore_mean.index,
+            y=fore_mean.values,
+            line=dict(color=fore_color, width=3),
+            mode="lines+markers+text",
+            marker=dict(size=9, symbol="diamond", color=fore_color),
+            text=[f"{v:.0f}%" for v in fore_mean.values],
+            textposition="top center",
+            textfont=dict(size=10, color=fore_color),
+            name=f"Forecast +{FORECAST_STEPS}M{flat_label}",
+            hovertemplate="<b>%{x|%b %Y}</b><br>Forecast: %{y:.1f}%<extra></extra>",
+        )
+    )
     end_x = monthly.index[-1].isoformat()
     fig.add_vline(x=end_x, line_color="#EF4444", line_width=1.3, line_dash="dash")
-    fig.add_annotation(x=end_x, y=0.96, xref="x", yref="paper",
-        text="← Historis | Forecast →", showarrow=False,
+    fig.add_annotation(
+        x=end_x,
+        y=0.96,
+        xref="x",
+        yref="paper",
+        text="← Historis | Forecast →",
+        showarrow=False,
         font=dict(color="#EF4444", size=9),
-        bgcolor="rgba(255,255,255,0.8)", borderpad=3, xanchor="center")
+        bgcolor="rgba(255,255,255,0.8)",
+        borderpad=3,
+        xanchor="center",
+    )
     if is_flat:
-        fig.add_annotation(x=0.5, y=0.92, xref="paper", yref="paper",
+        fig.add_annotation(
+            x=0.5,
+            y=0.92,
+            xref="paper",
+            yref="paper",
             text="⚠️ Forecast flat — model tidak menangkap pola musiman",
-            showarrow=False, font=dict(size=11, color="white"),
-            bgcolor="#EF4444", borderpad=6)
-    apply_base(fig,
-        title=dict(text=f"{title} — Forecast +{FORECAST_STEPS} Bulan | SARIMA{info['order']}×{fore['used_s_order']}",
-            font=dict(size=13, color="#1E3A5F")),
-        yaxis=dict(title="Okupansi (%)", range=[0, 125], ticksuffix="%", gridcolor="#F3F4F6"),
+            showarrow=False,
+            font=dict(size=11, color="white"),
+            bgcolor="#EF4444",
+            borderpad=6,
+        )
+    apply_base(
+        fig,
+        title=dict(
+            text=f"{title} — Forecast +{FORECAST_STEPS} Bulan | SARIMA{info['order']}×{fore['used_s_order']}",
+            font=dict(size=13, color="#1E3A5F"),
+        ),
+        yaxis=dict(
+            title="Okupansi (%)", range=[0, 125], ticksuffix="%", gridcolor="#F3F4F6"
+        ),
         height=400,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
-            bgcolor="rgba(255,255,255,0.9)", bordercolor="#E5E7EB", borderwidth=1))
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0,
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor="#E5E7EB",
+            borderwidth=1,
+        ),
+    )
     return fig
 
-def chart_scatter_occ_rev(clean_occ: dict, clean_fin: dict, villa_cfg: dict) -> go.Figure | None:
+
+def chart_scatter_occ_rev(
+    clean_occ: dict, clean_fin: dict, villa_cfg: dict
+) -> go.Figure | None:
     avail = [v for v in clean_occ if v in clean_fin]
     if not avail:
         return None
     n_cols = min(3, len(avail))
     n_rows = (len(avail) + n_cols - 1) // n_cols
-    fig = make_subplots(rows=n_rows, cols=n_cols,
+    fig = make_subplots(
+        rows=n_rows,
+        cols=n_cols,
         subplot_titles=[v.replace("_villas", "").title() for v in avail],
-        horizontal_spacing=0.10, vertical_spacing=0.14)
+        horizontal_spacing=0.10,
+        vertical_spacing=0.14,
+    )
     for idx, villa in enumerate(avail):
         row, col = idx // n_cols + 1, idx % n_cols + 1
         color = villa_cfg.get(villa, {}).get("color", "#2563EB")
         occ_m = clean_occ[villa].resample("MS").mean().rename("occ")
-        comb  = pd.concat([occ_m, clean_fin[villa]], axis=1).dropna()
+        comb = pd.concat([occ_m, clean_fin[villa]], axis=1).dropna()
         if len(comb) < 5:
             continue
         rev_m = comb["revenue"] / 1e6
-        r, p  = stats.pearsonr(comb["occ"], rev_m)
+        r, p = stats.pearsonr(comb["occ"], rev_m)
         m_, b_ = np.polyfit(comb["occ"], rev_m, 1)
         x_line = np.linspace(comb["occ"].min(), comb["occ"].max(), 100)
-        fig.add_trace(go.Scatter(x=comb["occ"], y=rev_m, mode="markers",
-            marker=dict(color=color, size=8, opacity=0.75, line=dict(color="white", width=1)),
-            name=villa.replace("_villas", "").title(),
-            hovertemplate="<b>%{customdata}</b><br>Occ: %{x:.1f}%<br>Rev: %{y:.1f}M IDR<extra></extra>",
-            customdata=comb.index.strftime("%b %Y")), row=row, col=col)
-        fig.add_trace(go.Scatter(x=x_line, y=m_ * x_line + b_,
-            line=dict(color="#EF4444", width=2, dash="dash"), showlegend=False), row=row, col=col)
-        fig.add_annotation(x=comb["occ"].quantile(0.05), y=rev_m.max() * 0.95,
-            text=f"r = {r:.3f}<br>p = {p:.3f}", showarrow=False,
+        fig.add_trace(
+            go.Scatter(
+                x=comb["occ"],
+                y=rev_m,
+                mode="markers",
+                marker=dict(
+                    color=color, size=8, opacity=0.75, line=dict(color="white", width=1)
+                ),
+                name=villa.replace("_villas", "").title(),
+                hovertemplate="<b>%{customdata}</b><br>Occ: %{x:.1f}%<br>Rev: %{y:.1f}M IDR<extra></extra>",
+                customdata=comb.index.strftime("%b %Y"),
+            ),
+            row=row,
+            col=col,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x_line,
+                y=m_ * x_line + b_,
+                line=dict(color="#EF4444", width=2, dash="dash"),
+                showlegend=False,
+            ),
+            row=row,
+            col=col,
+        )
+        fig.add_annotation(
+            x=comb["occ"].quantile(0.05),
+            y=rev_m.max() * 0.95,
+            text=f"r = {r:.3f}<br>p = {p:.3f}",
+            showarrow=False,
             font=dict(size=10, color="#374151"),
-            bgcolor="rgba(255,255,255,0.88)", borderpad=4, row=row, col=col)
-        fig.update_yaxes(title_text="Revenue (Juta IDR)", gridcolor="#F3F4F6", row=row, col=col)
-        fig.update_xaxes(title_text="Okupansi (%)", gridcolor="#F3F4F6", row=row, col=col)
-    fig.update_layout(height=380 * n_rows,
-        title=dict(text="Keterkaitan Okupansi ↔ Revenue", font=dict(size=14, color="#1E3A5F")),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(248,250,252,1)",
+            bgcolor="rgba(255,255,255,0.88)",
+            borderpad=4,
+            row=row,
+            col=col,
+        )
+        fig.update_yaxes(
+            title_text="Revenue (Juta IDR)", gridcolor="#F3F4F6", row=row, col=col
+        )
+        fig.update_xaxes(
+            title_text="Okupansi (%)", gridcolor="#F3F4F6", row=row, col=col
+        )
+    fig.update_layout(
+        height=380 * n_rows,
+        title=dict(
+            text="Keterkaitan Okupansi ↔ Revenue", font=dict(size=14, color="#1E3A5F")
+        ),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(248,250,252,1)",
         font=dict(family="DM Sans, sans-serif", size=11),
-        showlegend=False, margin=dict(l=60, r=30, t=80, b=40))
+        showlegend=False,
+        margin=dict(l=60, r=30, t=80, b=40),
+    )
     return fig
+
 
 def chart_residual(info: dict) -> go.Figure:
     resid = info["model"].resid.dropna()
     color = info["color"]
     title = info["title"]
-    m_val  = info.get("m", FALLBACK_M)
+    m_val = info.get("m", FALLBACK_M)
     lb_lag = max(3, min(m_val, len(resid) // 3))
-    lb     = acorr_ljungbox(resid, lags=[lb_lag, lb_lag * 2], return_df=True)
-    p12    = float(lb["lb_pvalue"].iloc[0])
+    lb = acorr_ljungbox(resid, lags=[lb_lag, lb_lag * 2], return_df=True)
+    p12 = float(lb["lb_pvalue"].iloc[0])
     _, p_n = stats.shapiro(resid[:50])
-    fig = make_subplots(rows=1, cols=3,
+    fig = make_subplots(
+        rows=1,
+        cols=3,
         subplot_titles=["Residual atas Waktu", "Distribusi Residual", "Q-Q Plot"],
-        horizontal_spacing=0.09)
-    fig.add_trace(go.Scatter(x=resid.index, y=resid.values,
-        line=dict(color=color, width=1.5), name="Residual"), row=1, col=1)
-    fig.add_hline(y=0, line_dash="dash", line_color="#9CA3AF", line_width=0.8, row=1, col=1)
+        horizontal_spacing=0.09,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=resid.index,
+            y=resid.values,
+            line=dict(color=color, width=1.5),
+            name="Residual",
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_hline(
+        y=0, line_dash="dash", line_color="#9CA3AF", line_width=0.8, row=1, col=1
+    )
     mu, sd = resid.mean(), resid.std()
-    x_fit  = np.linspace(resid.min(), resid.max(), 200)
-    fig.add_trace(go.Histogram(x=resid.values, nbinsx=20, marker_color=color, opacity=0.65,
-        histnorm="probability density", name="Hist"), row=1, col=2)
-    fig.add_trace(go.Scatter(x=x_fit, y=stats.norm.pdf(x_fit, mu, sd),
-        line=dict(color="#111827", width=1.5, dash="dash"), name="Normal"), row=1, col=2)
+    x_fit = np.linspace(resid.min(), resid.max(), 200)
+    fig.add_trace(
+        go.Histogram(
+            x=resid.values,
+            nbinsx=20,
+            marker_color=color,
+            opacity=0.65,
+            histnorm="probability density",
+            name="Hist",
+        ),
+        row=1,
+        col=2,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x_fit,
+            y=stats.norm.pdf(x_fit, mu, sd),
+            line=dict(color="#111827", width=1.5, dash="dash"),
+            name="Normal",
+        ),
+        row=1,
+        col=2,
+    )
     (osm, osr), (slope, intercept, _) = stats.probplot(resid, dist="norm")
-    fig.add_trace(go.Scatter(x=osm, y=osr, mode="markers",
-        marker=dict(color=color, size=5, opacity=0.7), name="Q-Q"), row=1, col=3)
+    fig.add_trace(
+        go.Scatter(
+            x=osm,
+            y=osr,
+            mode="markers",
+            marker=dict(color=color, size=5, opacity=0.7),
+            name="Q-Q",
+        ),
+        row=1,
+        col=3,
+    )
     x_line = np.array([min(osm), max(osm)])
-    fig.add_trace(go.Scatter(x=x_line, y=slope * x_line + intercept,
-        line=dict(color="#EF4444", width=1.5, dash="dash"), showlegend=False), row=1, col=3)
+    fig.add_trace(
+        go.Scatter(
+            x=x_line,
+            y=slope * x_line + intercept,
+            line=dict(color="#EF4444", width=1.5, dash="dash"),
+            showlegend=False,
+        ),
+        row=1,
+        col=3,
+    )
     for ci in range(1, 4):
         fig.update_yaxes(gridcolor="#F3F4F6", row=1, col=ci)
         fig.update_xaxes(gridcolor="#F3F4F6", row=1, col=ci)
     lb_lbl = "✅ LB OK" if p12 > 0.05 else "⚠️ Autokorelasi"
-    n_lbl  = "✅ Normal" if p_n > 0.05 else "⚠️ Non-normal"
+    n_lbl = "✅ Normal" if p_n > 0.05 else "⚠️ Non-normal"
     fig.update_layout(
-        title=dict(text=f"{title} — Diagnostik Residual | {lb_lbl} (p_lag{lb_lag}={p12:.3f}) | Shapiro p={p_n:.3f} {n_lbl}",
-            font=dict(size=12, color="#1E3A5F")),
+        title=dict(
+            text=f"{title} — Diagnostik Residual | {lb_lbl} (p_lag{lb_lag}={p12:.3f}) | Shapiro p={p_n:.3f} {n_lbl}",
+            font=dict(size=12, color="#1E3A5F"),
+        ),
         height=310,
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(248,250,252,1)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(248,250,252,1)",
         font=dict(family="DM Sans, sans-serif", size=11),
-        showlegend=False, margin=dict(l=60, r=30, t=70, b=40))
+        showlegend=False,
+        margin=dict(l=60, r=30, t=70, b=40),
+    )
     return fig
 
 
@@ -1237,8 +1984,10 @@ def chart_residual(info: dict) -> go.Figure:
 # KOMPONEN UI BERSAMA
 # ══════════════════════════════════════════════════════════════
 
+
 def kpi_card(label: str, value: str, sub: str = "", color: str = "#2563EB"):
-    st.markdown(f"""
+    st.markdown(
+        f"""
         <div style="background:white;border-left:4px solid {color};border-radius:8px;
                     padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:4px;">
             <div style="font-size:11px;color:#6B7280;font-weight:500;text-transform:uppercase;
@@ -1246,15 +1995,22 @@ def kpi_card(label: str, value: str, sub: str = "", color: str = "#2563EB"):
             <div style="font-size:22px;font-weight:700;color:#111827;">{value}</div>
             {f'<div style="font-size:11px;color:#6B7280;margin-top:2px;">{sub}</div>' if sub else ''}
         </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
+
 
 def section_header(text: str, icon: str = ""):
-    st.markdown(f"""
+    st.markdown(
+        f"""
         <div style="display:flex;align-items:center;gap:8px;margin:24px 0 12px;">
             <div style="width:4px;height:20px;background:#2563EB;border-radius:2px;"></div>
             <span style="font-size:16px;font-weight:700;color:#1E3A5F;">{icon} {text}</span>
         </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
+
 
 def status_badge(value: float, thresholds: tuple = (75, 50)) -> tuple[str, str, str]:
     if value >= thresholds[0]:
@@ -1263,6 +2019,7 @@ def status_badge(value: float, thresholds: tuple = (75, 50)) -> tuple[str, str, 
         return "🟡", "Sedang", "#FEF9C3"
     else:
         return "🔴", "Rendah", "#FEE2E2"
+
 
 def model_quality_badge(mape: float) -> tuple[str, str]:
     if np.isnan(mape):
@@ -1274,6 +2031,7 @@ def model_quality_badge(mape: float) -> tuple[str, str]:
     else:
         return "🔴", f"Perlu Review (SMAPE={mape:.1f}%)"
 
+
 def period_filter(clean_occ: dict, key: str) -> tuple:
     all_dates = []
     for s in clean_occ.values():
@@ -1283,14 +2041,21 @@ def period_filter(clean_occ: dict, key: str) -> tuple:
     if not all_dates:
         return None, None
     g_min, g_max = min(all_dates), max(all_dates)
-    PRESETS = {"Semua Data": None, "6 Bln Terakhir": 6, "1 Thn Terakhir": 12,
-               "2 Thn Terakhir": 24, "Custom": "custom"}
+    PRESETS = {
+        "Semua Data": None,
+        "6 Bln Terakhir": 6,
+        "1 Thn Terakhir": 12,
+        "2 Thn Terakhir": 24,
+        "Custom": "custom",
+    }
     c1, c2, c3 = st.columns([2, 2, 2])
     with c1:
-        preset = st.selectbox("Periode", list(PRESETS.keys()), index=0, key=f"{key}_preset")
+        preset = st.selectbox(
+            "Periode", list(PRESETS.keys()), index=0, key=f"{key}_preset"
+        )
     if preset == "Custom":
         months_list = pd.date_range(g_min, g_max, freq="MS")
-        labels      = [d.strftime("%b %Y") for d in months_list]
+        labels = [d.strftime("%b %Y") for d in months_list]
         with c2:
             sl = st.selectbox("Dari", labels, index=0, key=f"{key}_start")
         with c3:
@@ -1302,53 +2067,67 @@ def period_filter(clean_occ: dict, key: str) -> tuple:
     elif PRESETS[preset] is None:
         ds, de = g_min, g_max
     else:
-        n   = PRESETS[preset]
-        de  = g_max
-        ds  = max(g_max - pd.DateOffset(months=n - 1), g_min)
+        n = PRESETS[preset]
+        de = g_max
+        ds = max(g_max - pd.DateOffset(months=n - 1), g_min)
         with c2:
             st.info(f"📅 {ds.strftime('%b %Y')} — {de.strftime('%b %Y')}")
     n_months = len(pd.date_range(ds, de, freq="MS"))
-    st.caption(f"🗓️ **{ds.strftime('%B %Y')} — {de.strftime('%B %Y')}** ({n_months} bulan)")
+    st.caption(
+        f"🗓️ **{ds.strftime('%B %Y')} — {de.strftime('%B %Y')}** ({n_months} bulan)"
+    )
     return ds, de
+
 
 def filter_occ(clean_occ: dict, ds, de) -> dict:
     if ds is None or de is None:
         return clean_occ
     end_ = de + pd.DateOffset(months=1)
-    return {v: s[(s.index >= ds) & (s.index <= end_)]
-            for v, s in clean_occ.items()
-            if len(s[(s.index >= ds) & (s.index <= end_)]) > 0}
+    return {
+        v: s[(s.index >= ds) & (s.index <= end_)]
+        for v, s in clean_occ.items()
+        if len(s[(s.index >= ds) & (s.index <= end_)]) > 0
+    }
 
 
 # ══════════════════════════════════════════════════════════════
 # HALAMAN — LOGIN
 # ══════════════════════════════════════════════════════════════
 
+
 def page_login():
-    st.markdown("<style>.block-container { max-width: 520px; padding-top: 4rem; }</style>",
-                unsafe_allow_html=True)
+    st.markdown(
+        "<style>.block-container { max-width: 520px; padding-top: 4rem; }</style>",
+        unsafe_allow_html=True,
+    )
     st.markdown(
         f"<div style='text-align:center;margin-bottom:16px;'>"
         f"<img src='{LOGO_URL}' style='height:80px;object-fit:contain;'></div>",
-        unsafe_allow_html=True)
+        unsafe_allow_html=True,
+    )
     st.markdown(
         "<h2 style='text-align:center;color:#1E3A5F;margin:0 0 4px;'>"
         "Sistem Prediksi Tingkat Hunian</h2>"
         "<p style='text-align:center;color:#6B7280;font-size:14px;margin-bottom:24px;'>"
         "PT Bali Cipta Vila Mandiri</p>",
-        unsafe_allow_html=True)
+        unsafe_allow_html=True,
+    )
     tab_login, tab_reg = st.tabs(["🔐 Masuk", "📝 Daftar Akun"])
     with tab_login:
         with st.form("login_form"):
             username = st.text_input("Username", placeholder="Masukkan username")
-            password = st.text_input("Password", type="password", placeholder="Masukkan password")
-            submitted = st.form_submit_button("Masuk", use_container_width=True, type="primary")
+            password = st.text_input(
+                "Password", type="password", placeholder="Masukkan password"
+            )
+            submitted = st.form_submit_button(
+                "Masuk", use_container_width=True, type="primary"
+            )
         if submitted:
             user = db_auth(username, password)
             if user:
                 token = _gen_token(username)
                 session_save(token, username)
-                st.session_state.user      = user
+                st.session_state.user = user
                 st.session_state.logged_in = True
                 st.success(f"Selamat datang, **{username}**!")
                 time.sleep(0.4)
@@ -1358,7 +2137,7 @@ def page_login():
         st.caption("👤 Admin default: `admin` / `admin123`")
     with tab_reg:
         with st.form("reg_form"):
-            nu  = st.text_input("Username baru")
+            nu = st.text_input("Username baru")
             np_ = st.text_input("Password", type="password")
             np2 = st.text_input("Konfirmasi Password", type="password")
             reg = st.form_submit_button("Daftar", use_container_width=True)
@@ -1378,29 +2157,45 @@ def page_login():
 # HALAMAN — DASHBOARD UTAMA
 # ══════════════════════════════════════════════════════════════
 
+
 def page_dashboard(clean_occ: dict, clean_fin: dict, villa_cfg: dict):
     is_admin = st.session_state.user.get("role") == "admin"
     st.markdown(
         f"<h1 style='color:#1E3A5F;margin-bottom:4px;'> Dashboard Utama</h1>"
         f"<p style='color:#6B7280;margin-bottom:20px;'>"
         f"Ringkasan performa seluruh unit vila · {datetime.now().strftime('%d %B %Y, %H:%M')}</p>",
-        unsafe_allow_html=True)
+        unsafe_allow_html=True,
+    )
     if not clean_occ:
-        st.warning("⚠️ Belum ada data vila. Upload data melalui menu **Manajemen Data**.")
+        st.warning(
+            "⚠️ Belum ada data vila. Upload data melalui menu **Manajemen Data**."
+        )
         return
     section_header("Ringkasan Keseluruhan", "")
-    all_means    = [s.resample("MS").mean().mean() for s in clean_occ.values()]
-    global_mean  = np.mean(all_means) if all_means else 0
+    all_means = [s.resample("MS").mean().mean() for s in clean_occ.values()]
+    global_mean = np.mean(all_means) if all_means else 0
     n_with_model = sum(1 for v in villa_cfg if db_model_exists(v))
-    n_with_data  = len(clean_occ)
+    n_with_data = len(clean_occ)
     c1, c2, c3, c4 = st.columns(4)
-    with c1: kpi_card("Total Vila Terdaftar", str(len(villa_cfg)), "unit", "#2563EB")
-    with c2: kpi_card("Vila dengan Data", str(n_with_data), "unit aktif", "#059669")
-    with c3: kpi_card("Model Prediksi Siap", str(n_with_model), "vila terlatih",
-                 "#7C3AED" if n_with_model == len(villa_cfg) else "#D97706")
+    with c1:
+        kpi_card("Total Vila Terdaftar", str(len(villa_cfg)), "unit", "#2563EB")
+    with c2:
+        kpi_card("Vila dengan Data", str(n_with_data), "unit aktif", "#059669")
+    with c3:
+        kpi_card(
+            "Model Prediksi Siap",
+            str(n_with_model),
+            "vila terlatih",
+            "#7C3AED" if n_with_model == len(villa_cfg) else "#D97706",
+        )
     with c4:
         icon, _, _ = status_badge(global_mean)
-        kpi_card("Rata-rata Okupansi", f"{global_mean:.1f}%", f"{icon} keseluruhan", "#DB2777")
+        kpi_card(
+            "Rata-rata Okupansi",
+            f"{global_mean:.1f}%",
+            f"{icon} keseluruhan",
+            "#DB2777",
+        )
     st.markdown("<br>", unsafe_allow_html=True)
     section_header("Performa per Area", "📍")
     area_stats: dict = {}
@@ -1411,14 +2206,17 @@ def page_dashboard(clean_occ: dict, clean_fin: dict, villa_cfg: dict):
     for i, (area, means) in enumerate(sorted(area_stats.items())):
         with area_cols[i]:
             icon, label, bg = status_badge(np.mean(means))
-            st.markdown(f"""
+            st.markdown(
+                f"""
                 <div style="background:{bg};border-radius:10px;padding:16px;text-align:center;">
                     <div style="font-size:20px;">{icon}</div>
                     <div style="font-weight:700;font-size:18px;color:#111827;">{np.mean(means):.1f}%</div>
                     <div style="color:#374151;font-weight:600;">{area}</div>
                     <div style="font-size:12px;color:#6B7280;">{len(means)} vila</div>
                 </div>
-            """, unsafe_allow_html=True)
+            """,
+                unsafe_allow_html=True,
+            )
     st.markdown("<br>", unsafe_allow_html=True)
     section_header("Visualisasi Performa", "📈")
     col_left, col_right = st.columns([3, 2])
@@ -1429,22 +2227,22 @@ def page_dashboard(clean_occ: dict, clean_fin: dict, villa_cfg: dict):
     section_header("Status Vila", "🏡")
     rows = []
     for villa, cfg in villa_cfg.items():
-        has_data  = villa in clean_occ
+        has_data = villa in clean_occ
         has_model = db_model_exists(villa)
-        occ_mean  = clean_occ[villa].resample("MS").mean().mean() if has_data else 0
+        occ_mean = clean_occ[villa].resample("MS").mean().mean() if has_data else 0
         icon, lbl, _ = status_badge(occ_mean)
         row = {
-            "Vila":       villa.replace("_villas", "").title(),
-            "Area":       cfg["area"].title(),
-            "Data":       "✅" if has_data else "❌",
-            "Model":      "✅" if has_model else "❌",
-            "Rata-Rata Okupansi":   f"{occ_mean:.1f}%" if has_data else "—",
+            "Vila": villa.replace("_villas", "").title(),
+            "Area": cfg["area"].title(),
+            "Data": "✅" if has_data else "❌",
+            "Model": "✅" if has_model else "❌",
+            "Rata-Rata Okupansi": f"{occ_mean:.1f}%" if has_data else "—",
             "Diperbarui": db_model_trained_at(villa) if has_model else "—",
         }
         if is_admin:
             mi = db_load_model(villa)
             if mi:
-                row["RMSE (%)"]  = round(mi.get("rmse", 0), 2)
+                row["RMSE (%)"] = round(mi.get("rmse", 0), 2)
                 row["SMAPE (%)"] = round(mi.get("mape", 0), 2)
         rows.append(row)
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
@@ -1454,15 +2252,17 @@ def page_dashboard(clean_occ: dict, clean_fin: dict, villa_cfg: dict):
 # HALAMAN — MANAJEMEN DATA (Admin only)
 # ══════════════════════════════════════════════════════════════
 
+
 def page_manajemen_data(villa_cfg: dict):
     st.markdown(
         "<h1 style='color:#1E3A5F;'> Manajemen Data</h1>"
         "<p style='color:#6B7280;margin-bottom:20px;'>Upload, preview, dan kelola data "
         "ekspor Beds24 untuk setiap unit vila.</p>",
-        unsafe_allow_html=True)
-    tab_upload, tab_preview, tab_vila, tab_user = st.tabs([
-        "📤 Upload Data", "🔍 Preview & Hapus", "🏡 Kelola Vila", "👥 Kelola User"
-    ])
+        unsafe_allow_html=True,
+    )
+    tab_upload, tab_preview, tab_vila, tab_user = st.tabs(
+        ["📤 Upload Data", "🔍 Preview & Hapus", "🏡 Kelola Vila", "👥 Kelola User"]
+    )
 
     with tab_upload:
         section_header("Upload Data CSV dari Beds24", "📤")
@@ -1476,36 +2276,56 @@ def page_manajemen_data(villa_cfg: dict):
             c1, c2, c3 = st.columns(3)
             with c1:
                 villa_sel = st.selectbox(
-                    "Vila", list(villa_cfg.keys()),
-                    format_func=lambda v: f"{v.replace('_villas','').title()} ({villa_cfg[v]['area'].title()})"
+                    "Vila",
+                    list(villa_cfg.keys()),
+                    format_func=lambda v: f"{v.replace('_villas','').title()} ({villa_cfg[v]['area'].title()})",
                 )
             with c2:
                 dtype = st.selectbox(
-                    "Tipe Data", ["occupancy", "financial"],
-                    format_func=lambda x: "Operasional (Okupansi)" if x == "occupancy" else "Finansial (Revenue)"
+                    "Tipe Data",
+                    ["occupancy", "financial"],
+                    format_func=lambda x: (
+                        "Operasional (Okupansi)"
+                        if x == "occupancy"
+                        else "Finansial (Revenue)"
+                    ),
                 )
             with c3:
                 uploaded = st.file_uploader("File CSV", type=["csv"])
-            submit = st.form_submit_button("Upload & Simpan", type="primary", use_container_width=True)
+            submit = st.form_submit_button(
+                "Upload & Simpan", type="primary", use_container_width=True
+            )
         if submit and uploaded:
             try:
                 content = uploaded.read().decode("utf-8-sig")
-                df_up   = pd.read_csv(io.StringIO(content), sep=None, engine="python")
+                df_up = pd.read_csv(io.StringIO(content), sep=None, engine="python")
                 df_up.columns = df_up.columns.str.strip()
                 date_col = _find_col(df_up, ["date", "tanggal", "tgl"])
                 if not date_col:
                     st.error("❌ Kolom tanggal tidak ditemukan.")
                 else:
-                    n_rows  = len(df_up)
-                    merged  = db_save_data(villa_sel, dtype, uploaded.name, content, n_rows)
-                    info_   = db_data_info(villa_sel, dtype)
-                    log_upload(st.session_state.user["username"], villa_sel, dtype, uploaded.name, n_rows)
+                    n_rows = len(df_up)
+                    merged = db_save_data(
+                        villa_sel, dtype, uploaded.name, content, n_rows
+                    )
+                    info_ = db_data_info(villa_sel, dtype)
+                    log_upload(
+                        st.session_state.user["username"],
+                        villa_sel,
+                        dtype,
+                        uploaded.name,
+                        n_rows,
+                    )
                     load_all_data.clear()
                     if merged:
-                        st.success(f"✅ Data digabung. Total: **{info_['rows']:,} baris** tersimpan.")
+                        st.success(
+                            f"✅ Data digabung. Total: **{info_['rows']:,} baris** tersimpan."
+                        )
                     else:
                         st.success(f"✅ Data baru disimpan: **{n_rows:,} baris**.")
-                    st.info("💡 Latih model di menu **Strategi Hunian & Harga → Train Model**.")
+                    st.info(
+                        "💡 Latih model di menu **Strategi Hunian & Harga → Train Model**."
+                    )
             except Exception as e:
                 st.error(f"❌ Gagal memproses: {e}")
         elif submit and not uploaded:
@@ -1515,13 +2335,22 @@ def page_manajemen_data(villa_cfg: dict):
         if raw_list:
             df_list = pd.DataFrame(raw_list)
             df_list["vila"] = df_list["villa"].str.replace("_villas", "").str.title()
-            df_list["tipe"] = df_list["data_type"].map({"occupancy": "Operasional", "financial": "Finansial"})
+            df_list["tipe"] = df_list["data_type"].map(
+                {"occupancy": "Operasional", "financial": "Finansial"}
+            )
             st.dataframe(
-                df_list[["vila", "tipe", "filename", "rows", "uploaded"]].rename(columns={
-                    "vila": "Vila", "tipe": "Tipe", "filename": "File",
-                    "rows": "Baris", "uploaded": "Waktu Upload"
-                }),
-                use_container_width=True, hide_index=True)
+                df_list[["vila", "tipe", "filename", "rows", "uploaded"]].rename(
+                    columns={
+                        "vila": "Vila",
+                        "tipe": "Tipe",
+                        "filename": "File",
+                        "rows": "Baris",
+                        "uploaded": "Waktu Upload",
+                    }
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
         else:
             st.info("Belum ada data tersimpan di database.")
 
@@ -1530,15 +2359,19 @@ def page_manajemen_data(villa_cfg: dict):
         c1, c2 = st.columns(2)
         with c1:
             prev_villa = st.selectbox(
-                "Vila", list(villa_cfg.keys()),
+                "Vila",
+                list(villa_cfg.keys()),
                 format_func=lambda v: v.replace("_villas", "").title(),
-                key="prev_villa"
+                key="prev_villa",
             )
         with c2:
             prev_type = st.selectbox(
-                "Tipe Data", ["occupancy", "financial"],
-                format_func=lambda x: "Operasional" if x == "occupancy" else "Finansial",
-                key="prev_type"
+                "Tipe Data",
+                ["occupancy", "financial"],
+                format_func=lambda x: (
+                    "Operasional" if x == "occupancy" else "Finansial"
+                ),
+                key="prev_type",
             )
         if not villa_cfg:
             st.info("Belum ada vila terdaftar.")
@@ -1557,14 +2390,16 @@ def page_manajemen_data(villa_cfg: dict):
                     st.download_button(
                         "⬇️ Download CSV",
                         df_prev.to_csv(index=False).encode("utf-8"),
-                        f"{prev_villa}_{prev_type}.csv", "text/csv",
-                        use_container_width=True
+                        f"{prev_villa}_{prev_type}.csv",
+                        "text/csv",
+                        use_container_width=True,
                     )
                 with col_del:
                     if st.button(
-                        "🗑️ Hapus Data", type="secondary",
+                        "🗑️ Hapus Data",
+                        type="secondary",
                         use_container_width=True,
-                        key=f"del_{prev_villa}_{prev_type}"
+                        key=f"del_{prev_villa}_{prev_type}",
                     ):
                         db_delete_data(prev_villa, prev_type)
                         load_all_data.clear()
@@ -1584,11 +2419,15 @@ def page_manajemen_data(villa_cfg: dict):
         with st.form("add_villa"):
             c1, c2, c3 = st.columns(3)
             with c1:
-                new_name  = st.text_input("Nama Vila", placeholder="contoh: sunrise_villas")
+                new_name = st.text_input(
+                    "Nama Vila", placeholder="contoh: sunrise_villas"
+                )
             with c2:
-                new_area  = st.selectbox("Area", ["canggu", "seminyak", "ubud", "uluwatu", "lainnya"])
+                new_area = st.selectbox(
+                    "Area", ["canggu", "seminyak", "ubud", "uluwatu", "lainnya"]
+                )
             with c3:
-                used_c  = {v["color"] for v in villa_cfg.values()}
+                used_c = {v["color"] for v in villa_cfg.values()}
                 avail_c = [c for c in VILLA_COLORS if c not in used_c] or VILLA_COLORS
                 new_color = st.color_picker("Warna", value=avail_c[0])
             add_btn = st.form_submit_button("Tambah Vila", type="primary")
@@ -1600,22 +2439,35 @@ def page_manajemen_data(villa_cfg: dict):
                 st.warning(f"`{nc}` sudah ada.")
             else:
                 db_save_villa(nc, new_area, new_color)
-                st.session_state.villa_config[nc] = {"area": new_area, "color": new_color}
+                st.session_state.villa_config[nc] = {
+                    "area": new_area,
+                    "color": new_color,
+                }
                 load_all_data.clear()
                 st.success(f"✅ Vila `{nc}` ditambahkan.")
                 st.rerun()
         section_header("Daftar Vila", "📋")
-        rows_v = [{
-            "Villa":      v,
-            "Area":       cfg["area"].title(),
-            "Data":       "✅" if db_data_info(v, "financial") or db_data_info(v, "occupancy") else "❌",
-            "Model":      "✅" if db_model_exists(v) else "❌",
-            "Diperbarui": db_model_trained_at(v),
-        } for v, cfg in villa_cfg.items()]
+        rows_v = [
+            {
+                "Villa": v,
+                "Area": cfg["area"].title(),
+                "Data": (
+                    "✅"
+                    if db_data_info(v, "financial") or db_data_info(v, "occupancy")
+                    else "❌"
+                ),
+                "Model": "✅" if db_model_exists(v) else "❌",
+                "Diperbarui": db_model_trained_at(v),
+            }
+            for v, cfg in villa_cfg.items()
+        ]
         st.dataframe(pd.DataFrame(rows_v), use_container_width=True, hide_index=True)
         with st.expander("🗑️ Hapus Vila", expanded=False):
-            del_v = st.selectbox("Pilih vila untuk dihapus", list(villa_cfg.keys()),
-                format_func=lambda v: f"{v} ({villa_cfg[v]['area'].title()})")
+            del_v = st.selectbox(
+                "Pilih vila untuk dihapus",
+                list(villa_cfg.keys()),
+                format_func=lambda v: f"{v} ({villa_cfg[v]['area'].title()})",
+            )
             if st.button("Hapus Vila (beserta data & model)", type="secondary"):
                 db_delete_villa(del_v)
                 del st.session_state.villa_config[del_v]
@@ -1625,7 +2477,9 @@ def page_manajemen_data(villa_cfg: dict):
 
     with tab_user:
         section_header("Daftar User", "👥")
-        st.dataframe(pd.DataFrame(db_get_users()), use_container_width=True, hide_index=True)
+        st.dataframe(
+            pd.DataFrame(db_get_users()), use_container_width=True, hide_index=True
+        )
         section_header("Tambah User Baru", "➕")
         with st.form("add_user"):
             c1, c2, c3 = st.columns(3)
@@ -1643,22 +2497,33 @@ def page_manajemen_data(villa_cfg: dict):
         lt1, lt2 = st.tabs(["Log Upload", "Log Training"])
         with lt1:
             logs_u = get_upload_log()
-            st.dataframe(pd.DataFrame(logs_u) if logs_u else pd.DataFrame(),
-                         use_container_width=True, hide_index=True)
+            st.dataframe(
+                pd.DataFrame(logs_u) if logs_u else pd.DataFrame(),
+                use_container_width=True,
+                hide_index=True,
+            )
         with lt2:
             logs_m = get_model_log()
-            st.dataframe(pd.DataFrame(logs_m) if logs_m else pd.DataFrame(),
-                         use_container_width=True, hide_index=True)
+            st.dataframe(
+                pd.DataFrame(logs_m) if logs_m else pd.DataFrame(),
+                use_container_width=True,
+                hide_index=True,
+            )
 
 
 # ══════════════════════════════════════════════════════════════
 # HALAMAN — STRATEGI HUNIAN & HARGA
 # ══════════════════════════════════════════════════════════════
 
+
 def page_strategi(
-    clean_occ: dict, clean_fin: dict,
-    sarima_models: dict, fore_info_all: dict,
-    villa_cfg: dict, villa_d: dict, villa_m: dict,
+    clean_occ: dict,
+    clean_fin: dict,
+    sarima_models: dict,
+    fore_info_all: dict,
+    villa_cfg: dict,
+    villa_d: dict,
+    villa_m: dict,
     selected_villas: list,
 ):
     is_admin = st.session_state.user.get("role") == "admin"
@@ -1666,20 +2531,25 @@ def page_strategi(
         "<h1 style='color:#1E3A5F;'> Strategi Hunian & Harga</h1>"
         "<p style='color:#6B7280;margin-bottom:20px;'>"
         "Prediksi tingkat hunian SARIMA dan analisis keterkaitan harga historis (ADR).</p>",
-        unsafe_allow_html=True)
+        unsafe_allow_html=True,
+    )
 
     if is_admin:
-        tabs = st.tabs([
-            "🔭 Prediksi & Strategi",
-            "🔬 Analisis Teknis (EDA)",
-            "🤖 Analisis per Vila",
-            "🚀 Train Model",
-        ])
+        tabs = st.tabs(
+            [
+                "🔭 Prediksi & Strategi",
+                "🔬 Analisis Teknis (EDA)",
+                "🤖 Analisis per Vila",
+                "🚀 Train Model",
+            ]
+        )
     else:
-        tabs = st.tabs([
-            "🔭 Prediksi & Strategi",
-            "💰 Analisis Harga",
-        ])
+        tabs = st.tabs(
+            [
+                "🔭 Prediksi & Strategi",
+                "💰 Analisis Harga",
+            ]
+        )
 
     with tabs[0]:
 
@@ -1696,11 +2566,13 @@ def page_strategi(
                     4. ✅ **Refresh Halaman**
                     """)
                 else:
-                    st.info("💡 Hubungi administrator untuk melatih model prediksi SARIMA.")
+                    st.info(
+                        "💡 Hubungi administrator untuk melatih model prediksi SARIMA."
+                    )
             with col2:
                 st.markdown("###  Status Vila Saat Ini")
                 for villa in selected_villas:
-                    has_data  = villa in clean_occ
+                    has_data = villa in clean_occ
                     has_model = db_model_exists(villa)
                     villa_name = villa.replace("_villas", "").title()
                     if has_data and has_model:
@@ -1711,20 +2583,25 @@ def page_strategi(
                         status, color_bg = "⚠️ Data Hilang", "#FEE2E2"
                     else:
                         status, color_bg = "❌ Belum Ada Data", "#FEE2E2"
-                    st.markdown(f"""
+                    st.markdown(
+                        f"""
                     <div style="background:{color_bg};border-radius:8px;padding:8px 12px;margin-bottom:6px;">
                         <strong>{villa_name}</strong><br>
                         <span style="font-size:12px;">{status}</span>
                     </div>
-                    """, unsafe_allow_html=True)
+                    """,
+                        unsafe_allow_html=True,
+                    )
                 n_ready = sum(1 for v in selected_villas if v in sarima_models)
                 st.divider()
                 st.metric("Model Siap", f"{n_ready}/{len(selected_villas)} vila")
         else:
             section_header(f"Prediksi Hunian +{FORECAST_STEPS} Bulan ke Depan", "🔭")
             n_cols_sum = min(len(selected_villas), 4)
-            sum_cols   = st.columns(n_cols_sum)
-            for i, villa in enumerate([v for v in selected_villas if v in sarima_models]):
+            sum_cols = st.columns(n_cols_sum)
+            for i, villa in enumerate(
+                [v for v in selected_villas if v in sarima_models]
+            ):
                 info = sarima_models[villa]
                 fore = fore_info_all.get(villa, {})
                 if not fore:
@@ -1732,14 +2609,17 @@ def page_strategi(
                 avg_f = fore["fore_mean"].mean()
                 icon, label, bg = status_badge(avg_f)
                 with sum_cols[i % n_cols_sum]:
-                    st.markdown(f"""
+                    st.markdown(
+                        f"""
                         <div style="background:{bg};border-radius:10px;padding:12px;text-align:center;margin-bottom:8px;">
                             <div style="font-size:14px;">{icon}</div>
                             <div style="font-weight:700;font-size:20px;color:#111827;">{avg_f:.0f}%</div>
                             <div style="font-size:12px;font-weight:600;color:#374151;">{info['title']}</div>
                             <div style="font-size:11px;color:#6B7280;">{label}</div>
                         </div>
-                    """, unsafe_allow_html=True)
+                    """,
+                        unsafe_allow_html=True,
+                    )
 
             st.markdown("<br>", unsafe_allow_html=True)
             section_header("Grafik Forecast per Vila", "📈")
@@ -1752,20 +2632,32 @@ def page_strategi(
                     continue
                 st.plotly_chart(chart_forecast(info, fore), use_container_width=True)
                 with st.expander(f" Detail Prediksi {info['title']}", expanded=False):
-                    forecast_df = pd.DataFrame({
-                        "Bulan":             fore["fore_mean"].index.strftime("%b %Y"),
-                        "Prediksi (%)":      fore["fore_mean"].values.round(1),
-                        "Lower Bound (%)":   fore["fore_ci"].iloc[:, 0].values.round(1),
-                        "Upper Bound (%)":   fore["fore_ci"].iloc[:, 1].values.round(1),
-                    })
+                    forecast_df = pd.DataFrame(
+                        {
+                            "Bulan": fore["fore_mean"].index.strftime("%b %Y"),
+                            "Prediksi (%)": fore["fore_mean"].values.round(1),
+                            "Lower Bound (%)": fore["fore_ci"]
+                            .iloc[:, 0]
+                            .values.round(1),
+                            "Upper Bound (%)": fore["fore_ci"]
+                            .iloc[:, 1]
+                            .values.round(1),
+                        }
+                    )
                     col1, col2 = st.columns([2, 1])
                     with col1:
-                        st.dataframe(forecast_df, use_container_width=True, hide_index=True)
+                        st.dataframe(
+                            forecast_df, use_container_width=True, hide_index=True
+                        )
                     with col2:
-                        st.metric("Rata-rata Prediksi", f"{fore['fore_mean'].mean():.1f}%")
+                        st.metric(
+                            "Rata-rata Prediksi", f"{fore['fore_mean'].mean():.1f}%"
+                        )
                         st.metric("Std Deviasi", f"{fore['fore_mean'].std():.1f}%")
                         if fore["is_flat"]:
-                            st.warning("⚠️ Prediksi flat — model tidak menangkap pola musiman")
+                            st.warning(
+                                "⚠️ Prediksi flat — model tidak menangkap pola musiman"
+                            )
                         else:
                             st.success("✅ Model menangkap variasi musiman")
             st.divider()
@@ -1778,7 +2670,9 @@ def page_strategi(
         fig_sc = chart_scatter_occ_rev(clean_occ, clean_fin, villa_cfg)
         if fig_sc:
             st.plotly_chart(fig_sc, use_container_width=True)
-            st.caption("**r mendekati +1** = hubungan positif kuat. **p < 0.05** = signifikan.")
+            st.caption(
+                "**r mendekati +1** = hubungan positif kuat. **p < 0.05** = signifikan."
+            )
         else:
             st.info("Data tidak cukup untuk scatter plot.")
         section_header("Statistik Revenue Historis", "📋")
@@ -1786,17 +2680,21 @@ def page_strategi(
         for villa, rev in clean_fin.items():
             if villa not in selected_villas:
                 continue
-            fin_rows.append({
-                "Vila":          villa.replace("_villas", "").title(),
-                "Area":          villa_cfg.get(villa, {}).get("area", "").title(),
-                "N Bulan":       len(rev),
-                "Total Revenue": f"Rp {rev.sum():,.0f}",
-                "Rata-rata/Bln": f"Rp {rev.mean():,.0f}",
-                "Median/Bln":    f"Rp {rev.median():,.0f}",
-                "Tertinggi":     f"Rp {rev.max():,.0f}",
-            })
+            fin_rows.append(
+                {
+                    "Vila": villa.replace("_villas", "").title(),
+                    "Area": villa_cfg.get(villa, {}).get("area", "").title(),
+                    "N Bulan": len(rev),
+                    "Total Revenue": f"Rp {rev.sum():,.0f}",
+                    "Rata-rata/Bln": f"Rp {rev.mean():,.0f}",
+                    "Median/Bln": f"Rp {rev.median():,.0f}",
+                    "Tertinggi": f"Rp {rev.max():,.0f}",
+                }
+            )
         if fin_rows:
-            st.dataframe(pd.DataFrame(fin_rows), use_container_width=True, hide_index=True)
+            st.dataframe(
+                pd.DataFrame(fin_rows), use_container_width=True, hide_index=True
+            )
         section_header("Tren Revenue Bulanan", "📈")
         fig_rev = go.Figure()
         for villa, rev in clean_fin.items():
@@ -1804,17 +2702,28 @@ def page_strategi(
                 continue
             color = villa_cfg.get(villa, {}).get("color", "#2563EB")
             rev_m = rev / 1e6
-            fig_rev.add_trace(go.Scatter(
-                x=rev_m.index, y=rev_m.values,
-                line=dict(color=color, width=2), mode="lines+markers", marker=dict(size=4),
-                name=villa.replace("_villas", "").title(),
-                hovertemplate="<b>%{fullData.name}</b><br>%{x|%b %Y}: Rp%{y:.1f}M<extra></extra>",
-            ))
-        apply_base(fig_rev,
-            title=dict(text="Revenue Bulanan per Vila (Juta IDR)", font=dict(size=13, color="#1E3A5F")),
+            fig_rev.add_trace(
+                go.Scatter(
+                    x=rev_m.index,
+                    y=rev_m.values,
+                    line=dict(color=color, width=2),
+                    mode="lines+markers",
+                    marker=dict(size=4),
+                    name=villa.replace("_villas", "").title(),
+                    hovertemplate="<b>%{fullData.name}</b><br>%{x|%b %Y}: Rp%{y:.1f}M<extra></extra>",
+                )
+            )
+        apply_base(
+            fig_rev,
+            title=dict(
+                text="Revenue Bulanan per Vila (Juta IDR)",
+                font=dict(size=13, color="#1E3A5F"),
+            ),
             yaxis=dict(title="Revenue (Juta IDR)", gridcolor="#F3F4F6"),
             height=340,
-            legend=dict(bgcolor="rgba(255,255,255,0.9)", bordercolor="#E5E7EB", borderwidth=1),
+            legend=dict(
+                bgcolor="rgba(255,255,255,0.9)", bordercolor="#E5E7EB", borderwidth=1
+            ),
         )
         st.plotly_chart(fig_rev, use_container_width=True)
 
@@ -1833,122 +2742,187 @@ def page_strategi(
                 if villa not in selected_villas:
                     continue
                 monthly = series.resample("MS").mean().dropna()
-                eda_rows.append({
-                    "Vila":       villa.replace("_villas", "").title(),
-                    "Area":       villa_cfg.get(villa, {}).get("area", "").title(),
-                    "N (bln)":    len(monthly),
-                    "Mean (%)":   round(monthly.mean(), 2),
-                    "Std (%)":    round(monthly.std(),  2),
-                    "Min (%)":    round(monthly.min(),  2),
-                    "Max (%)":    round(monthly.max(),  2),
-                    "Median (%)": round(monthly.median(), 2),
-                    "Mulai":      monthly.index.min().strftime("%b %Y"),
-                    "Akhir":      monthly.index.max().strftime("%b %Y"),
-                })
+                eda_rows.append(
+                    {
+                        "Vila": villa.replace("_villas", "").title(),
+                        "Area": villa_cfg.get(villa, {}).get("area", "").title(),
+                        "N (bln)": len(monthly),
+                        "Mean (%)": round(monthly.mean(), 2),
+                        "Std (%)": round(monthly.std(), 2),
+                        "Min (%)": round(monthly.min(), 2),
+                        "Max (%)": round(monthly.max(), 2),
+                        "Median (%)": round(monthly.median(), 2),
+                        "Mulai": monthly.index.min().strftime("%b %Y"),
+                        "Akhir": monthly.index.max().strftime("%b %Y"),
+                    }
+                )
             if eda_rows:
-                st.dataframe(pd.DataFrame(eda_rows), use_container_width=True, hide_index=True)
+                st.dataframe(
+                    pd.DataFrame(eda_rows), use_container_width=True, hide_index=True
+                )
             section_header("Distribusi Ocupansi Bulanan per Vila", "")
             for villa in selected_villas:
                 if villa not in clean_occ_e:
                     continue
-                series  = clean_occ_e[villa]
-                color   = villa_cfg.get(villa, {}).get("color", "#2563EB")
+                series = clean_occ_e[villa]
+                color = villa_cfg.get(villa, {}).get("color", "#2563EB")
                 title_v = villa.replace("_villas", "").title()
-                area    = villa_cfg.get(villa, {}).get("area", "").title()
+                area = villa_cfg.get(villa, {}).get("area", "").title()
                 monthly = series.resample("MS").mean()
-                mean_v  = monthly.mean()
-                bar_colors = [color if v >= mean_v else hex_rgba(color, 0.5) for v in monthly.values]
+                mean_v = monthly.mean()
+                bar_colors = [
+                    color if v >= mean_v else hex_rgba(color, 0.5)
+                    for v in monthly.values
+                ]
                 fig_e = go.Figure()
-                fig_e.add_trace(go.Bar(
-                    x=monthly.index, y=monthly.values,
-                    marker_color=bar_colors, marker_line_width=0,
-                    text=[f"{v:.0f}%" for v in monthly.values],
-                    textposition="outside", textfont=dict(size=8),
-                    hovertemplate="<b>%{x|%b %Y}</b><br>Ocupansi: %{y:.1f}%<extra></extra>",
-                ))
-                fig_e.add_hline(y=mean_v, line_dash="dash", line_color="#EF4444",
+                fig_e.add_trace(
+                    go.Bar(
+                        x=monthly.index,
+                        y=monthly.values,
+                        marker_color=bar_colors,
+                        marker_line_width=0,
+                        text=[f"{v:.0f}%" for v in monthly.values],
+                        textposition="outside",
+                        textfont=dict(size=8),
+                        hovertemplate="<b>%{x|%b %Y}</b><br>Ocupansi: %{y:.1f}%<extra></extra>",
+                    )
+                )
+                fig_e.add_hline(
+                    y=mean_v,
+                    line_dash="dash",
+                    line_color="#EF4444",
                     annotation_text=f"Mean: {mean_v:.1f}%",
                     annotation_position="top right",
-                    annotation_font=dict(color="#EF4444", size=10))
-                apply_base(fig_e,
-                    title=dict(text=f"{title_v} — Distribusi Bulanan",
-                               font=dict(size=13, color="#1E3A5F")),
-                    yaxis=dict(title="Ocupansi (%)", range=[0, 120],
-                               ticksuffix="%", gridcolor="#F3F4F6"),
-                    height=260, showlegend=False,
+                    annotation_font=dict(color="#EF4444", size=10),
+                )
+                apply_base(
+                    fig_e,
+                    title=dict(
+                        text=f"{title_v} — Distribusi Bulanan",
+                        font=dict(size=13, color="#1E3A5F"),
+                    ),
+                    yaxis=dict(
+                        title="Ocupansi (%)",
+                        range=[0, 120],
+                        ticksuffix="%",
+                        gridcolor="#F3F4F6",
+                    ),
+                    height=260,
+                    showlegend=False,
                     margin=dict(l=60, r=30, t=60, b=60),
                 )
-                fig_e.update_xaxes(tickangle=-45, tickvals=monthly.index,
-                    ticktext=[d.strftime("%b %Y") for d in monthly.index])
+                fig_e.update_xaxes(
+                    tickangle=-45,
+                    tickvals=monthly.index,
+                    ticktext=[d.strftime("%b %Y") for d in monthly.index],
+                )
                 st.plotly_chart(fig_e, use_container_width=True)
             render_harga_tab()
 
         with tabs[2]:
             section_header("Analisis Mendalam per Vila", "🏡")
             st.markdown(
-                "Setiap vila: **Dekomposisi → ADF & Siklus → ACF/PACF → Hasil Model**.")
+                "Setiap vila: **Dekomposisi → ADF & Siklus → ACF/PACF → Hasil Model**."
+            )
             st.divider()
             for villa in selected_villas:
                 if villa not in clean_occ:
                     continue
-                info    = sarima_models.get(villa)
+                info = sarima_models.get(villa)
                 monthly = clean_occ[villa].resample("MS").mean().dropna()
-                color   = villa_cfg.get(villa, {}).get("color", "#2563EB")
+                color = villa_cfg.get(villa, {}).get("color", "#2563EB")
                 title_v = villa.replace("_villas", "").title()
-                area    = villa_cfg.get(villa, {}).get("area", "").title()
-                d_val   = villa_d.get(villa, 1)
-                m_val   = villa_m.get(villa, 12)
+                area = villa_cfg.get(villa, {}).get("area", "").title()
+                d_val = villa_d.get(villa, 1)
+                m_val = villa_m.get(villa, 12)
                 mean_occ = monthly.mean()
                 n_months = len(monthly)
-                label_exp = (
-                    f"**{title_v}** · {area} "
-                    + (f"" if info else "")
-                )
+                label_exp = f"**{title_v}** · {area} " + (f"" if info else "")
                 with st.expander(label_exp, expanded=False):
                     c1, c2, c3, c4, c5 = st.columns(5)
                     c1.metric("Rata-rata Okupansi", f"{mean_occ:.1f}%")
-                    c2.metric("Data Historis",      f"{n_months} bln")
-                    c3.metric("d (differencing)",   str(d_val))
-                    c4.metric("m (seasonality)",    str(m_val))
+                    c2.metric("Data Historis", f"{n_months} bln")
+                    c3.metric("d (differencing)", str(d_val))
+                    c4.metric("m (seasonality)", str(m_val))
                     if info:
                         c5.metric("RMSE (Test Set)", f"{info.get('rmse', 0):.1f}%")
                     st.divider()
-                    t1, t2, t3, t4 = st.tabs([
-                        "📈 Dekomposisi", "🔬 ADF & Siklus", "📉 ACF/PACF", "🤖 Hasil Model"
-                    ])
+                    t1, t2, t3, t4 = st.tabs(
+                        [
+                            "📈 Dekomposisi",
+                            "🔬 ADF & Siklus",
+                            "📉 ACF/PACF",
+                            "🤖 Hasil Model",
+                        ]
+                    )
                     with t1:
                         if n_months < 24:
-                            st.warning("⚠️ Data kurang dari 24 bulan — dekomposisi tidak tersedia.")
+                            st.warning(
+                                "⚠️ Data kurang dari 24 bulan — dekomposisi tidak tersedia."
+                            )
                         else:
                             fig_d = chart_decomposition(monthly, m_val, color, title_v)
                             if fig_d:
                                 st.plotly_chart(fig_d, use_container_width=True)
                             try:
-                                decomp = seasonal_decompose(monthly, model="additive", period=m_val,
-                                                            extrapolate_trend="freq")
-                                slope  = np.polyfit(range(len(decomp.trend.dropna())),
-                                                    decomp.trend.dropna().values, 1)[0]
-                                s_str  = decomp.seasonal.std() / decomp.observed.std() * 100
-                                r_str  = decomp.resid.dropna().std() / decomp.observed.std() * 100
+                                decomp = seasonal_decompose(
+                                    monthly,
+                                    model="additive",
+                                    period=m_val,
+                                    extrapolate_trend="freq",
+                                )
+                                slope = np.polyfit(
+                                    range(len(decomp.trend.dropna())),
+                                    decomp.trend.dropna().values,
+                                    1,
+                                )[0]
+                                s_str = (
+                                    decomp.seasonal.std() / decomp.observed.std() * 100
+                                )
+                                r_str = (
+                                    decomp.resid.dropna().std()
+                                    / decomp.observed.std()
+                                    * 100
+                                )
                                 cd1, cd2, cd3 = st.columns(3)
-                                cd1.metric("Arah Tren",
-                                    "📈 Naik" if slope > 0.05 else ("📉 Turun" if slope < -0.05 else "➡️ Datar"),
-                                    f"{slope:+.2f}%/bln")
-                                cd2.metric("Kekuatan Musiman", f"{s_str:.1f}%",
-                                    "Kuat" if s_str > 20 else "⚠️ Lemah")
-                                cd3.metric("Noise (Residual)", f"{r_str:.1f}%",
-                                    "✅ Rendah" if r_str < 30 else "⚠️ Tinggi")
+                                cd1.metric(
+                                    "Arah Tren",
+                                    (
+                                        "📈 Naik"
+                                        if slope > 0.05
+                                        else (
+                                            "📉 Turun" if slope < -0.05 else "➡️ Datar"
+                                        )
+                                    ),
+                                    f"{slope:+.2f}%/bln",
+                                )
+                                cd2.metric(
+                                    "Kekuatan Musiman",
+                                    f"{s_str:.1f}%",
+                                    "Kuat" if s_str > 20 else "⚠️ Lemah",
+                                )
+                                cd3.metric(
+                                    "Noise (Residual)",
+                                    f"{r_str:.1f}%",
+                                    "✅ Rendah" if r_str < 30 else "⚠️ Tinggi",
+                                )
                                 parts = []
                                 if slope > 0.05:
                                     parts.append(f"Tren **naik** ({slope:+.2f}%/bln).")
                                 elif slope < -0.05:
-                                    parts.append(f"Tren **turun** ({slope:+.2f}%/bln) — perlu strategi.")
+                                    parts.append(
+                                        f"Tren **turun** ({slope:+.2f}%/bln) — perlu strategi."
+                                    )
                                 else:
                                     parts.append("Tren **stabil**.")
                                 if s_str > 20:
-                                    parts.append(f"Pola musiman **kuat** ({s_str:.1f}%) — siklus m={m_val} bln.")
+                                    parts.append(
+                                        f"Pola musiman **kuat** ({s_str:.1f}%) — siklus m={m_val} bln."
+                                    )
                                 else:
-                                    parts.append(f"Pola musiman **lemah** ({s_str:.1f}%).")
+                                    parts.append(
+                                        f"Pola musiman **lemah** ({s_str:.1f}%)."
+                                    )
                             except Exception:
                                 pass
                     with t2:
@@ -1956,55 +2930,121 @@ def page_strategi(
                         ca1, ca2 = st.columns(2)
                         with ca1:
                             st.markdown("#### Hasil Uji ADF")
-                            st.dataframe(pd.DataFrame([
-                                {"Parameter": "ADF Statistic", "Nilai": f"{res0['statistic']:.4f}"},
-                                {"Parameter": "p-value",       "Nilai": f"{res0['pvalue']:.4f}"},
-                                {"Parameter": "Stasioner?",    "Nilai": "✅ Ya" if res0["stationary"] else "❌ Tidak"},
-                                {"Parameter": "d digunakan",   "Nilai": str(d_val)},
-                                *[{"Parameter": f"CV {k}", "Nilai": str(v)} for k, v in res0["critical"].items()],
-                            ]), use_container_width=True, hide_index=True)
+                            st.dataframe(
+                                pd.DataFrame(
+                                    [
+                                        {
+                                            "Parameter": "ADF Statistic",
+                                            "Nilai": f"{res0['statistic']:.4f}",
+                                        },
+                                        {
+                                            "Parameter": "p-value",
+                                            "Nilai": f"{res0['pvalue']:.4f}",
+                                        },
+                                        {
+                                            "Parameter": "Stasioner?",
+                                            "Nilai": (
+                                                "✅ Ya"
+                                                if res0["stationary"]
+                                                else "❌ Tidak"
+                                            ),
+                                        },
+                                        {
+                                            "Parameter": "d digunakan",
+                                            "Nilai": str(d_val),
+                                        },
+                                        *[
+                                            {"Parameter": f"CV {k}", "Nilai": str(v)}
+                                            for k, v in res0["critical"].items()
+                                        ],
+                                    ]
+                                ),
+                                use_container_width=True,
+                                hide_index=True,
+                            )
                             if res0["stationary"]:
-                                st.success(f"✅ Data stasioner (p={res0['pvalue']:.3f}). d=0.")
+                                st.success(
+                                    f"✅ Data stasioner (p={res0['pvalue']:.3f}). d=0."
+                                )
                             else:
-                                st.info(f"📌 Belum stasioner (p={res0['pvalue']:.3f}) → d={d_val}.")
+                                st.info(
+                                    f"📌 Belum stasioner (p={res0['pvalue']:.3f}) → d={d_val}."
+                                )
                         with ca2:
                             st.markdown("#### Deteksi Periode Musiman (Periodogram)")
                             freqs, power = scipy_periodogram(monthly.values)
-                            valid   = freqs[1:] > 0
+                            valid = freqs[1:] > 0
                             periods = 1.0 / freqs[1:][valid]
-                            pwr     = power[1:][valid]
-                            fig_pg  = go.Figure()
-                            fig_pg.add_trace(go.Scatter(x=periods, y=pwr,
-                                fill="tozeroy", fillcolor="rgba(156,163,175,0.15)",
-                                line=dict(color="#9CA3AF", width=1.5),
-                                hovertemplate="Periode: %{x:.1f} bln<br>Power: %{y:.0f}<extra></extra>"))
-                            fig_pg.add_vline(x=m_val, line_color=color, line_width=2.5, line_dash="dash")
-                            fig_pg.add_annotation(x=m_val, y=0.85, xref="x", yref="paper",
-                                text=f"m={m_val}", showarrow=True, arrowhead=2,
-                                font=dict(color=color, size=12), bgcolor="white", borderpad=3)
-                            fig_pg.update_layout(height=220,
-                                xaxis=dict(title="Periode (bulan)", range=[1, 37], gridcolor="#F3F4F6"),
+                            pwr = power[1:][valid]
+                            fig_pg = go.Figure()
+                            fig_pg.add_trace(
+                                go.Scatter(
+                                    x=periods,
+                                    y=pwr,
+                                    fill="tozeroy",
+                                    fillcolor="rgba(156,163,175,0.15)",
+                                    line=dict(color="#9CA3AF", width=1.5),
+                                    hovertemplate="Periode: %{x:.1f} bln<br>Power: %{y:.0f}<extra></extra>",
+                                )
+                            )
+                            fig_pg.add_vline(
+                                x=m_val,
+                                line_color=color,
+                                line_width=2.5,
+                                line_dash="dash",
+                            )
+                            fig_pg.add_annotation(
+                                x=m_val,
+                                y=0.85,
+                                xref="x",
+                                yref="paper",
+                                text=f"m={m_val}",
+                                showarrow=True,
+                                arrowhead=2,
+                                font=dict(color=color, size=12),
+                                bgcolor="white",
+                                borderpad=3,
+                            )
+                            fig_pg.update_layout(
+                                height=220,
+                                xaxis=dict(
+                                    title="Periode (bulan)",
+                                    range=[1, 37],
+                                    gridcolor="#F3F4F6",
+                                ),
                                 yaxis=dict(title="Spectral Power", gridcolor="#F3F4F6"),
-                                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(248,250,252,1)",
+                                paper_bgcolor="rgba(0,0,0,0)",
+                                plot_bgcolor="rgba(248,250,252,1)",
                                 font=dict(family="DM Sans, sans-serif", size=11),
-                                margin=dict(l=50, r=30, t=20, b=40))
+                                margin=dict(l=50, r=30, t=20, b=40),
+                            )
                             st.plotly_chart(fig_pg, use_container_width=True)
                     with t3:
                         fig_ap = chart_acf_pacf(monthly, m_val, color, title_v)
                         st.plotly_chart(fig_ap, use_container_width=True)
                         n = len(monthly)
                         conf = 1.96 / np.sqrt(n)
-                        acf_v, _ = sm_acf(monthly, nlags=min(36, n - 1), fft=True, alpha=0.05)
-                        pac_v, _ = sm_pacf(monthly, nlags=min(36, n // 2 - 1), alpha=0.05)
-                        sig_acf  = [i for i, v in enumerate(acf_v[1:], 1) if abs(v) > conf]
-                        sig_pacf = [i for i, v in enumerate(pac_v[1:], 1) if abs(v) > conf]
+                        acf_v, _ = sm_acf(
+                            monthly, nlags=min(36, n - 1), fft=True, alpha=0.05
+                        )
+                        pac_v, _ = sm_pacf(
+                            monthly, nlags=min(36, n // 2 - 1), alpha=0.05
+                        )
+                        sig_acf = [
+                            i for i, v in enumerate(acf_v[1:], 1) if abs(v) > conf
+                        ]
+                        sig_pacf = [
+                            i for i, v in enumerate(pac_v[1:], 1) if abs(v) > conf
+                        ]
                         c_a, c_p = st.columns(2)
                         with c_a:
                             st.markdown("**Lag signifikan ACF:**")
                             if sig_acf:
                                 st.write(", ".join([f"`{l}`" for l in sig_acf[:12]]))
                                 if any(l % m_val == 0 for l in sig_acf[:18]):
-                                    st.success(f"✅ Lag kelipatan {m_val} signifikan → pola musiman")
+                                    st.success(
+                                        f"✅ Lag kelipatan {m_val} signifikan → pola musiman"
+                                    )
                             else:
                                 st.info("Tidak ada lag signifikan")
                         with c_p:
@@ -2018,22 +3058,37 @@ def page_strategi(
                         if not info:
                             st.info("⏳ Model belum dilatih.")
                         else:
-                            p, d_o, q    = info["order"]
-                            P, D, Q, ms  = info["seasonal_order"]
+                            p, d_o, q = info["order"]
+                            P, D, Q, ms = info["seasonal_order"]
                             cm1, cm2, cm3, cm4 = st.columns(4)
-                            cm1.metric("Order",          f"({p},{d_o},{q})")
-                            cm2.metric("Seasonal",       f"({P},{D},{Q})[{ms}]")
-                            cm3.metric("AIC (full)",     f"{info['model'].aic:.1f}")
+                            cm1.metric("Order", f"({p},{d_o},{q})")
+                            cm2.metric("Seasonal", f"({P},{D},{Q})[{ms}]")
+                            cm3.metric("AIC (full)", f"{info['model'].aic:.1f}")
                             cm4.metric("RMSE (Test Set)", f"{info.get('rmse', 0):.2f}%")
-                            st.plotly_chart(chart_model_fit(info), use_container_width=True)
-                            st.plotly_chart(chart_residual(info), use_container_width=True)
+                            st.plotly_chart(
+                                chart_model_fit(info), use_container_width=True
+                            )
+                            st.plotly_chart(
+                                chart_residual(info), use_container_width=True
+                            )
                             st.markdown("**Interpretasi Model:**")
                             pts = []
-                            if p  > 0: pts.append(f"**AR({p})**: Hunian dipengaruhi {p} bulan sebelumnya")
-                            if d_o > 0: pts.append(f"**I({d_o})**: Data di-differencing (stasioner)")
-                            if q  > 0: pts.append(f"**MA({q})**: Koreksi {q} error prediksi sebelumnya")
+                            if p > 0:
+                                pts.append(
+                                    f"**AR({p})**: Hunian dipengaruhi {p} bulan sebelumnya"
+                                )
+                            if d_o > 0:
+                                pts.append(
+                                    f"**I({d_o})**: Data di-differencing (stasioner)"
+                                )
+                            if q > 0:
+                                pts.append(
+                                    f"**MA({q})**: Koreksi {q} error prediksi sebelumnya"
+                                )
                             if P > 0 or Q > 0:
-                                pts.append(f"**Seasonal ({P},{D},{Q})[{ms}]**: Pola musiman tiap {ms} bulan")
+                                pts.append(
+                                    f"**Seasonal ({P},{D},{Q})[{ms}]**: Pola musiman tiap {ms} bulan"
+                                )
                             for pt in pts:
                                 st.markdown(f"- {pt}")
                             mape_v = info.get("mape", float("nan"))
@@ -2044,24 +3099,33 @@ def page_strategi(
                             elif not np.isnan(mape_v) and mape_v < 30:
                                 st.warning(f"{mq_i} {mq_l} | RMSE={rmse_v:.1f}%")
                             else:
-                                st.error(f"{mq_i} Pertimbangkan retrain atau tambah data historis.")
+                                st.error(
+                                    f"{mq_i} Pertimbangkan retrain atau tambah data historis."
+                                )
 
         with tabs[3]:
             section_header("Training Model SARIMA", "🚀")
 
-            with st.expander("ℹ️ Vila dengan Konfigurasi SARIMA Tervalidasi (Preset Notebook v3)", expanded=False):
+            with st.expander(
+                "ℹ️ Vila dengan Konfigurasi SARIMA Tervalidasi (Preset Notebook v3)",
+                expanded=False,
+            ):
                 ov_rows = []
                 for vk, ov in SARIMA_OVERRIDE.items():
-                    ov_rows.append({
-                        "Vila":            vk.replace("_villas", "").title(),
-                        "Order":           str(ov["order"]),
-                        "Seasonal Order":  str(ov["seasonal_order"]),
-                        "RMSE (%)":        ov["rmse_override"],
-                        "SMAPE (%)":       ov["smape_override"],
-                        "Sumber":          "Notebook v3 Tabel 4.6",
-                    })
+                    ov_rows.append(
+                        {
+                            "Vila": vk.replace("_villas", "").title(),
+                            "Order": str(ov["order"]),
+                            "Seasonal Order": str(ov["seasonal_order"]),
+                            "RMSE (%)": ov["rmse_override"],
+                            "SMAPE (%)": ov["smape_override"],
+                            "Sumber": "Notebook v3 Tabel 4.6",
+                        }
+                    )
                 if ov_rows:
-                    st.dataframe(pd.DataFrame(ov_rows), use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        pd.DataFrame(ov_rows), use_container_width=True, hide_index=True
+                    )
                     st.caption(
                         "Vila di atas akan menggunakan konfigurasi SARIMA yang sudah divalidasi dari "
                         "eksperimen notebook v3. Nilai RMSE/SMAPE adalah hasil evaluasi pada test set "
@@ -2069,7 +3133,9 @@ def page_strategi(
                         "Kosongkan `SARIMA_OVERRIDE` di kode jika ingin semua villa pakai auto-training."
                     )
                 else:
-                    st.info("SARIMA_OVERRIDE kosong — semua villa akan menggunakan auto-training.")
+                    st.info(
+                        "SARIMA_OVERRIDE kosong — semua villa akan menggunakan auto-training."
+                    )
 
             avail_tr = [v for v in villa_cfg if v in clean_occ]
             if not avail_tr:
@@ -2079,7 +3145,9 @@ def page_strategi(
             c_sel, c_opt = st.columns([3, 1])
             with c_sel:
                 train_sel = st.multiselect(
-                    "Pilih Vila untuk Dilatih", avail_tr, default=avail_tr,
+                    "Pilih Vila untuk Dilatih",
+                    avail_tr,
+                    default=avail_tr,
                     format_func=lambda v: (
                         f"{v.replace('_villas','').title()} "
                         f"{'[Preset]' if v in SARIMA_OVERRIDE else '[Auto]'} "
@@ -2087,19 +3155,26 @@ def page_strategi(
                     ),
                 )
             with c_opt:
-                force = st.checkbox("Force Retrain", value=False,
-                    help="Centang untuk melatih ulang vila yang sudah punya model")
+                force = st.checkbox(
+                    "Force Retrain",
+                    value=False,
+                    help="Centang untuk melatih ulang vila yang sudah punya model",
+                )
             if st.button("🚀 Mulai Training", type="primary", use_container_width=True):
                 to_train = [v for v in train_sel if force or not db_model_exists(v)]
-                skipped  = [v for v in train_sel if not force and db_model_exists(v)]
+                skipped = [v for v in train_sel if not force and db_model_exists(v)]
                 if skipped:
-                    st.info(f"⏭️ Dilewati: {', '.join(v.replace('_villas','').title() for v in skipped)}")
+                    st.info(
+                        f"⏭️ Dilewati: {', '.join(v.replace('_villas','').title() for v in skipped)}"
+                    )
                 if not to_train:
-                    st.warning("Tidak ada vila yang perlu dilatih. Centang **Force Retrain**.")
+                    st.warning(
+                        "Tidak ada vila yang perlu dilatih. Centang **Force Retrain**."
+                    )
                 else:
-                    pb       = st.progress(0)
+                    pb = st.progress(0)
                     status_t = st.empty()
-                    results  = []
+                    results = []
                     for i, villa in enumerate(to_train):
                         t_v = villa.replace("_villas", "").title()
                         status_t.text(f"⚙️ Training {t_v} ({i+1}/{len(to_train)})...")
@@ -2115,41 +3190,63 @@ def page_strategi(
                             )
                             db_save_model(villa, info_tr)
                             log_model(
-                                st.session_state.user["username"], villa,
+                                st.session_state.user["username"],
+                                villa,
                                 f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
                                 info_tr["model"].aic,
                                 info_tr.get("rmse", 0),
                                 info_tr.get("mape", 0),
                             )
-                            st.session_state.setdefault("sarima_cache", {})[villa] = info_tr
-                            results.append({
-                                "Vila":          t_v,
-                                "Konfigurasi":   "✅ Preset" if villa in SARIMA_OVERRIDE else "🔄 Auto",
-                                "Order":         f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
-                                "AIC":           round(info_tr["model"].aic, 4),
-                                "AIC Valid":     "✅" if is_valid_aic(info_tr["model"].aic) else "⚠️",
-                                "RMSE (%)":      round(info_tr.get("rmse", 0), 4),
-                                "SMAPE (%)":     round(info_tr.get("smape", 0), 4),
-                                "Status":        "✅ Berhasil",
-                            })
+                            st.session_state.setdefault("sarima_cache", {})[
+                                villa
+                            ] = info_tr
+                            results.append(
+                                {
+                                    "Vila": t_v,
+                                    "Konfigurasi": (
+                                        "✅ Preset"
+                                        if villa in SARIMA_OVERRIDE
+                                        else "🔄 Auto"
+                                    ),
+                                    "Order": f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
+                                    "AIC": round(info_tr["model"].aic, 4),
+                                    "AIC Valid": (
+                                        "✅"
+                                        if is_valid_aic(info_tr["model"].aic)
+                                        else "⚠️"
+                                    ),
+                                    "RMSE (%)": round(info_tr.get("rmse", 0), 4),
+                                    "SMAPE (%)": round(info_tr.get("smape", 0), 4),
+                                    "Status": "✅ Berhasil",
+                                }
+                            )
                         except Exception as e:
                             results.append({"Vila": t_v, "Status": f"❌ {str(e)[:80]}"})
                     pb.progress(1.0)
                     status_t.text("✅ Training selesai!")
-                    success_count = len([r for r in results if "✅" in r.get("Status", "")])
-                    st.success(f"Berhasil melatih **{success_count}** dari {len(to_train)} vila.")
-                    st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+                    success_count = len(
+                        [r for r in results if "✅" in r.get("Status", "")]
+                    )
+                    st.success(
+                        f"Berhasil melatih **{success_count}** dari {len(to_train)} vila."
+                    )
+                    st.dataframe(
+                        pd.DataFrame(results), use_container_width=True, hide_index=True
+                    )
                     st.info("🔄 Refresh halaman untuk melihat hasil forecast terbaru.")
 
             with st.expander("📋 Log Training"):
                 logs_m = get_model_log()
                 if logs_m:
-                    st.dataframe(pd.DataFrame(logs_m), use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        pd.DataFrame(logs_m), use_container_width=True, hide_index=True
+                    )
 
 
 # ══════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════
+
 
 def main():
     st.set_page_config(
@@ -2158,7 +3255,8 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded",
     )
-    st.markdown("""
+    st.markdown(
+        """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
     html, body, [class*="css"] { font-family: 'DM Sans', sans-serif !important; }
@@ -2176,7 +3274,9 @@ def main():
         box-shadow: 0 1px 3px rgba(0,0,0,0.06);
     }
     </style>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     if "db_initialized" not in st.session_state:
         init_db()
@@ -2184,12 +3284,12 @@ def main():
 
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
-        st.session_state.user      = {}
+        st.session_state.user = {}
 
     if not st.session_state.logged_in:
         saved = session_load()
         if saved:
-            st.session_state.user      = saved
+            st.session_state.user = saved
             st.session_state.logged_in = True
 
     if not st.session_state.logged_in:
@@ -2199,14 +3299,15 @@ def main():
     if "villa_config" not in st.session_state:
         st.session_state.villa_config = db_load_villas()
     villa_cfg = st.session_state.villa_config
-    is_admin  = st.session_state.user.get("role") == "admin"
-    username  = st.session_state.user.get("username", "")
+    is_admin = st.session_state.user.get("role") == "admin"
+    username = st.session_state.user.get("username", "")
 
     with st.sidebar:
         st.markdown(
             f"<div style='text-align:center;padding:12px 0 8px;'>"
             f"<img src='{LOGO_URL}' style='height:60px;object-fit:contain;'></div>",
-            unsafe_allow_html=True)
+            unsafe_allow_html=True,
+        )
         role_color = "#DC2626" if is_admin else "#2563EB"
         role_label = "Admin" if is_admin else "User"
         st.markdown(
@@ -2214,33 +3315,45 @@ def main():
             f"<span style='font-size:13px;color:#374151;'>{username}</span>&nbsp;"
             f"<span style='background:{role_color};color:white;font-size:11px;"
             f"font-weight:600;padding:2px 8px;border-radius:12px;'>{role_label}</span>"
-            f"</div>", unsafe_allow_html=True)
+            f"</div>",
+            unsafe_allow_html=True,
+        )
         st.divider()
 
         if is_admin:
-            nav = st.radio("Navigasi", [
-                " Dashboard Utama",
-                " Strategi Hunian & Harga",
-                " Manajemen Data",
-            ], label_visibility="collapsed")
+            nav = st.radio(
+                "Navigasi",
+                [
+                    " Dashboard Utama",
+                    " Strategi Hunian & Harga",
+                    " Manajemen Data",
+                ],
+                label_visibility="collapsed",
+            )
         else:
-            nav = st.radio("Navigasi", [
-                " Dashboard Utama",
-                " Strategi Hunian & Harga",
-            ], label_visibility="collapsed")
+            nav = st.radio(
+                "Navigasi",
+                [
+                    " Dashboard Utama",
+                    " Strategi Hunian & Harga",
+                ],
+                label_visibility="collapsed",
+            )
 
         if nav in [" Dashboard Utama", " Strategi Hunian & Harga"]:
             st.divider()
             st.markdown(
                 "<div style='font-size:12px;font-weight:600;color:#374151;"
                 "text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;'>Filter Vila</div>",
-                unsafe_allow_html=True)
+                unsafe_allow_html=True,
+            )
             selected_villas = st.multiselect(
                 "Filter Vila",
                 options=list(villa_cfg.keys()),
                 default=list(villa_cfg.keys()),
                 format_func=lambda v: f"{v.replace('_villas','').title()} · {villa_cfg[v]['area'].title()}",
-                label_visibility="collapsed")
+                label_visibility="collapsed",
+            )
             if not selected_villas:
                 st.warning("Pilih minimal 1 vila.")
                 selected_villas = list(villa_cfg.keys())
@@ -2256,7 +3369,8 @@ def main():
         st.markdown(
             "<div style='font-size:10px;color:#9CA3AF;text-align:center;padding-top:8px;'>"
             "SARIMA Forecasting System<br>PT Bali Cipta Vila Mandiri<br>© 2025</div>",
-            unsafe_allow_html=True)
+            unsafe_allow_html=True,
+        )
 
     if nav == " Manajemen Data":
         if not is_admin:
@@ -2266,7 +3380,9 @@ def main():
         return
 
     with st.spinner("Memuat data..."):
-        clean_occ_all, clean_fin_all = load_all_data(json.dumps(villa_cfg, sort_keys=True))
+        clean_occ_all, clean_fin_all = load_all_data(
+            json.dumps(villa_cfg, sort_keys=True)
+        )
 
     if nav == " Dashboard Utama":
         page_dashboard(clean_occ_all, clean_fin_all, villa_cfg)
@@ -2292,70 +3408,81 @@ def main():
         if villa in cache and villa in clean_occ:
             sarima_models[villa] = cache[villa]
 
-    for villa in [v for v in selected_villas if v not in sarima_models and v in clean_occ]:
+    for villa in [
+        v for v in selected_villas if v not in sarima_models and v in clean_occ
+    ]:
         mi = db_load_model(villa)
         if not mi:
             continue
         try:
             monthly = clean_occ[villa].resample("MS").mean().dropna()
-            order   = mi.get("order", (1, 1, 1))
-            s_order = mi.get("seasonal_order", (0, 0, 0, 0))
-            d_val   = mi.get("d", villa_d.get(villa, 1))
-            m_val   = mi.get("m", villa_m.get(villa, FALLBACK_M))
-            color_  = villa_cfg.get(villa, {}).get("color", "#2563EB")
-            title_  = villa.replace("_villas", "").title()
 
-            # FIX 4: Test split dinamis — konsisten dengan train_sarima dan notebook v3
-            # max(int(n * 0.20), 3) bukan hardcode 3 bulan
-            n_test_    = max(int(len(monthly) * 0.20), 3)
+            # ── Gunakan order dari SARIMA_OVERRIDE jika tersedia ──
+            if villa in SARIMA_OVERRIDE:
+                ov_ = SARIMA_OVERRIDE[villa]
+                order = ov_["order"]  # ← pakai preset, bukan dari DB
+                s_order = ov_["seasonal_order"]  # ← pakai preset, bukan dari DB
+                rmse_ = ov_["rmse_override"]
+                mape_ = ov_["smape_override"]
+                aic_val = ov_["aic_override"]
+                d_val   = ov_["order"][1]           # d dari order[1]
+                m_val   = ov_["seasonal_order"][3]  # m dari seasonal_order[3]
+            else:
+                order = mi.get("order", (1, 1, 1))
+                s_order = mi.get("seasonal_order", (0, 0, 0, 0))
+                rmse_ = None  # dihitung live di bawah
+                mape_ = None
+                aic_val = None
+
+            d_val = mi.get("d", villa_d.get(villa, 1))
+            m_val = mi.get("m", villa_m.get(villa, FALLBACK_M))
+            color_ = villa_cfg.get(villa, {}).get("color", "#2563EB")
+            title_ = villa.replace("_villas", "").title()
+
+            n_test_ = max(int(len(monthly) * 0.20), 3)
             split_idx_ = len(monthly) - n_test_
             train_, test_ = monthly.iloc[:split_idx_], monthly.iloc[split_idx_:]
 
             model_train_ = _fit_sarimax(train_, order, s_order)
-            pred_obj_    = model_train_.get_forecast(steps=len(test_))
-            pred_mean_   = pred_obj_.predicted_mean.clip(0, 100)
-            pred_ci_     = pred_obj_.conf_int(alpha=0.10)
+            pred_obj_ = model_train_.get_forecast(steps=len(test_))
+            pred_mean_ = pred_obj_.predicted_mean.clip(0, 100)
+            pred_ci_ = pred_obj_.conf_int(alpha=0.10)
 
-            # Pakai metrik dari preset jika villa ada di SARIMA_OVERRIDE,
-            # jika tidak hitung live dari data
-            if villa in SARIMA_OVERRIDE:
-                ov_     = SARIMA_OVERRIDE[villa]
-                rmse_   = ov_["rmse_override"]
-                mape_   = ov_["smape_override"]
-                aic_val = ov_["aic_override"]   # None → hitung dari model live
-            else:
-                rmse_   = compute_rmse(test_.values, pred_mean_.values)
-                mape_   = compute_smape(test_.values, pred_mean_.values)
-                aic_val = None
+            # Hitung live hanya untuk non-override
+            if rmse_ is None:
+                rmse_ = compute_rmse(test_.values, pred_mean_.values)
+            if mape_ is None:
+                mape_ = compute_smape(test_.values, pred_mean_.values)
 
             model_full_raw = _fit_sarimax(monthly, order, s_order)
-            train_fitted_  = model_train_.fittedvalues.clip(0, 100)
+            train_fitted_ = model_train_.fittedvalues.clip(0, 100)
 
-            # Wrap AIC hanya jika ada override value (bukan None)
-            if aic_val is not None:
-                model_full_ = _AICWrapper(model_full_raw, aic_val)
-            else:
-                model_full_ = model_full_raw
+            model_full_ = (
+                _AICWrapper(model_full_raw, aic_val)
+                if aic_val is not None
+                else model_full_raw
+            )
 
             sarima_models[villa] = {
                 **mi,
-                "model"         : model_full_,
-                "model_train"   : model_train_,
-                "order"         : order,
+                "model": model_full_,
+                "model_train": model_train_,
+                "order": order,
                 "seasonal_order": s_order,
-                "train"         : train_,
-                "test"          : test_,
-                "monthly"       : monthly,
-                "pred_mean"     : pred_mean_,
-                "pred_ci"       : pred_ci_,
-                "train_fitted"  : train_fitted_,
-                "rmse"          : rmse_,
-                "mape"          : mape_,
-                "smape"         : mape_,
-                "d"             : d_val,
-                "m"             : m_val,
-                "color"         : color_,
-                "title"         : title_,
+                "train": train_,
+                "test": test_,
+                "monthly": monthly,
+                "pred_mean": pred_mean_,
+                "pred_ci": pred_ci_,
+                "train_fitted": train_fitted_,
+                "rmse": rmse_,
+                "mape": mape_,
+                "smape": mape_,
+                "d": d_val,
+                "m": m_val,
+                "color": color_,
+                "title": title_,
+                "villa_key": villa,  # ← sudah benar di kode kamu
             }
         except Exception:
             pass
@@ -2368,9 +3495,13 @@ def main():
             pass
 
     page_strategi(
-        clean_occ, clean_fin,
-        sarima_models, fore_info_all,
-        villa_cfg, villa_d, villa_m,
+        clean_occ,
+        clean_fin,
+        sarima_models,
+        fore_info_all,
+        villa_cfg,
+        villa_d,
+        villa_m,
         selected_villas,
     )
 
