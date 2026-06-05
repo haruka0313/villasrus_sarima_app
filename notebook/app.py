@@ -2117,14 +2117,14 @@ def page_strategi(
     if is_admin:
         tabs = st.tabs(
             [
-                "🔭 Prediksi & Strategi",
+                "Prediksi Okupansi Villa",
                 "🔬 Analisis Teknis (EDA)",
                 "🤖 Analisis per Vila",
                 "🚀 Train Model",
             ]
         )
     else:
-        tabs = st.tabs(["🔭 Prediksi & Strategi"])
+        tabs = st.tabs(["Prediksi Okupansi Villa"])
 
     with tabs[0]:
         if not sarima_models:
