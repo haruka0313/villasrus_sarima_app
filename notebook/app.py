@@ -557,6 +557,7 @@ def db_save_model(villa: str, info: dict):
         sb.table("models").update(model_data).eq("villa", villa).execute()
     else:
         sb.table("models").insert(model_data).execute()
+    invalidate_model_caches()
 
 
 def db_load_model(villa: str) -> dict | None:
@@ -571,6 +572,52 @@ def db_load_model(villa: str) -> dict | None:
     except Exception:
         return None
 
+@st.cache_data(show_spinner=False, ttl=300)
+def db_get_all_model_status() -> dict:
+    """1 query untuk status semua model (hindari N+1)."""
+    sb = get_supabase()
+    res = (
+        sb.table("models")
+        .select("villa, order_str, aic, rmse, mape, trained_at")
+        .execute()
+    )
+    return {r["villa"]: r for r in (res.data or [])}
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def db_load_model_cached(villa: str) -> dict | None:
+    """Cache hasil download pkl model 30 menit."""
+    return db_load_model(villa)
+
+
+@st.cache_data(show_spinner=False, ttl=300)
+def db_get_data_hash() -> str:
+    """1 query untuk semua vila — dipakai sebagai cache-invalidation key."""
+    sb = get_supabase()
+    res = (
+        sb.table("raw_data")
+        .select("villa, rows, uploaded")
+        .eq("data_type", "occupancy")
+        .order("villa")
+        .execute()
+    )
+    return hashlib.md5(str(res.data).encode()).hexdigest()
+
+
+def invalidate_model_caches():
+    """Panggil setelah training/hapus model."""
+    db_get_all_model_status.clear()
+    db_load_model_cached.clear()
+    try:
+        build_sarima_from_saved.clear()
+    except Exception:
+        pass
+
+
+def invalidate_data_caches():
+    """Panggil setelah upload/hapus data mentah."""
+    load_all_data.clear()
+    db_get_data_hash.clear()
 
 def db_model_exists(villa: str) -> bool:
     sb = get_supabase()
@@ -909,6 +956,15 @@ def run_detect_m_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFra
         )
     return villa_m, pd.DataFrame(rows)
 
+
+@st.cache_data(show_spinner=False)
+def run_adf_all_cached(_clean_occ: dict, _villa_cfg: dict, villa_keys: tuple, data_hash: str):
+    return run_adf_all(_clean_occ, _villa_cfg)
+
+
+@st.cache_data(show_spinner=False)
+def run_detect_m_all_cached(_clean_occ: dict, _villa_cfg: dict, villa_keys: tuple, data_hash: str):
+    return run_detect_m_all(_clean_occ, _villa_cfg)
 # ══════════════════════════════════════════════════════════════
 # SARIMA — TRAINING & FORECAST
 # ══════════════════════════════════════════════════════════════
@@ -1124,6 +1180,52 @@ def train_sarima(
         "model_status": model_status,
     }
 
+@st.cache_resource(show_spinner=False, ttl=3600)
+def build_sarima_from_saved(villa, order, seasonal_order, d_val, m_val, color_, title_,
+                             rmse_, mape_, aic_val, _monthly, data_hash):
+    """Refit model dari data tersimpan, di-cache lintas sesi."""
+    monthly = _monthly
+    n_test_ = max(int(len(monthly) * 0.20), 3)
+    split_idx_ = len(monthly) - n_test_
+    train_, test_ = monthly.iloc[:split_idx_], monthly.iloc[split_idx_:]
+
+    model_train_ = _fit_sarimax(train_, order, seasonal_order)
+    pred_obj_ = model_train_.get_forecast(steps=len(test_))
+    pred_mean_ = pred_obj_.predicted_mean.clip(0, 100)
+    pred_ci_ = pred_obj_.conf_int(alpha=0.10)
+
+    rmse_val = rmse_ if rmse_ is not None else compute_rmse(test_.values, pred_mean_.values)
+    mape_val = mape_ if mape_ is not None else compute_smape(test_.values, pred_mean_.values)
+
+    model_full_raw = _fit_sarimax(monthly, order, seasonal_order)
+    train_fitted_ = model_train_.fittedvalues.clip(0, 100)
+    model_full_ = (
+        _AICWrapper(model_full_raw, aic_val) if aic_val is not None else model_full_raw
+    )
+
+    return {
+        "model": model_full_,
+        "model_train": model_train_,
+        "order": order,
+        "seasonal_order": seasonal_order,
+        "train": train_,
+        "test": test_,
+        "monthly": monthly,
+        "pred_mean": pred_mean_,
+        "pred_ci": pred_ci_,
+        "train_fitted": train_fitted_,
+        "rmse": rmse_val,
+        "mape": mape_val,
+        "smape": mape_val,
+        "d": d_val,
+        "m": m_val,
+        "color": color_,
+        "title": title_,
+        "villa_key": villa,
+    }
+@st.cache_data(show_spinner=False, ttl=3600)
+def make_forecast_cached(villa: str, order, seasonal_order, data_hash: str, _info: dict) -> dict:
+    return make_forecast(_info)
 
 def make_forecast(info: dict) -> dict:
     villa_key = info.get("villa_key", "")
@@ -1153,10 +1255,19 @@ def make_forecast(info: dict) -> dict:
         (1, 1, 0, m), (0, 1, 1, m), (1, 1, 1, m),
     ]
 
-    try:
-        model_full = _fit_sarimax(monthly, order, s_order)
-    except Exception:
-        model_full = info["model"]
+    model_full = info.get("model")
+    if model_full is None:
+        try:
+            model_full = _fit_sarimax(monthly, order, s_order)
+        except Exception:
+            model_full = None
+    if model_full is None:
+        return {
+            "fore_mean": pd.Series(dtype=float),
+            "fore_ci": pd.DataFrame(),
+            "used_s_order": s_order,
+            "is_flat": True,
+        }
 
     fore_obj = model_full.get_forecast(steps=FORECAST_STEPS)
     fore_mean = fore_obj.predicted_mean.clip(0, 100)
@@ -1204,6 +1315,7 @@ def make_forecast(info: dict) -> dict:
         "used_s_order": s_order,
         "is_flat": is_flat,
     }
+
 
 # ══════════════════════════════════════════════════════════════
 # PLOTLY — BASE LAYOUT & CHART FUNCTIONS
@@ -1810,7 +1922,8 @@ def page_dashboard(clean_occ: dict, villa_cfg: dict):
     section_header("Ringkasan Keseluruhan", "")
     all_means = [s.resample("MS").mean().mean() for s in clean_occ.values()]
     global_mean = np.mean(all_means) if all_means else 0
-    n_with_model = sum(1 for v in villa_cfg if db_model_exists(v))
+    all_model_status = db_get_all_model_status()
+    n_with_model = len(all_model_status)
     n_with_data = len(clean_occ)
 
     c1, c2, c3, c4 = st.columns(4)
@@ -1861,7 +1974,8 @@ def page_dashboard(clean_occ: dict, villa_cfg: dict):
     rows = []
     for villa, cfg in villa_cfg.items():
         has_data = villa in clean_occ
-        has_model = db_model_exists(villa)
+        ms = all_model_status.get(villa)
+        has_model = ms is not None
         occ_mean = clean_occ[villa].resample("MS").mean().mean() if has_data else 0
         icon, lbl, _ = status_badge(occ_mean)
         row = {
@@ -1870,13 +1984,11 @@ def page_dashboard(clean_occ: dict, villa_cfg: dict):
             "Data": "✅" if has_data else "❌",
             "Model": "✅" if has_model else "❌",
             "Rata-Rata Okupansi": f"{occ_mean:.1f}%" if has_data else "—",
-            "Diperbarui": db_model_trained_at(villa) if has_model else "—",
+            "Diperbarui": ms["trained_at"] if has_model else "—",
         }
-        if is_admin:
-            mi = db_load_model(villa)
-            if mi:
-                row["RMSE (%)"] = round(mi.get("rmse", 0), 2)
-                row["SMAPE (%)"] = round(mi.get("mape", 0), 2)
+        if is_admin and has_model:
+            row["RMSE (%)"] = round(ms.get("rmse", 0) or 0, 2)
+            row["SMAPE (%)"] = round(ms.get("mape", 0) or 0, 2)
         rows.append(row)
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -1932,7 +2044,7 @@ def page_manajemen_data(villa_cfg: dict):
                         st.session_state.user["username"],
                         villa_sel, "occupancy", uploaded.name, n_rows,
                     )
-                    load_all_data.clear()
+                    invalidate_data_caches()
                     if merged:
                         st.success(f"✅ Data digabung. Total: **{info_['rows']:,} baris** tersimpan.")
                     else:
@@ -1995,7 +2107,7 @@ def page_manajemen_data(villa_cfg: dict):
                         key=f"del_{prev_villa}_occupancy",
                     ):
                         db_delete_data(prev_villa, "occupancy")
-                        load_all_data.clear()
+                        invalidate_data_caches()
                         st.success("✅ Data dihapus.")
                         st.rerun()
             else:
@@ -2029,18 +2141,20 @@ def page_manajemen_data(villa_cfg: dict):
             else:
                 db_save_villa(nc, new_area, new_color)
                 st.session_state.villa_config[nc] = {"area": new_area, "color": new_color}
-                load_all_data.clear()
+                invalidate_data_caches()
                 st.success(f"✅ Vila `{nc}` ditambahkan.")
                 st.rerun()
 
         section_header("Daftar Vila", "📋")
+        all_status_v = db_get_all_model_status()
+        data_list_v = {r["villa"] for r in db_list_data() if r.get("data_type") == "occupancy"}
         rows_v = [
             {
                 "Villa": v,
                 "Area": cfg["area"].title(),
-                "Data": "✅" if db_data_info(v, "occupancy") else "❌",
-                "Model": "✅" if db_model_exists(v) else "❌",
-                "Diperbarui": db_model_trained_at(v),
+                "Data": "✅" if v in data_list_v else "❌",
+                "Model": "✅" if v in all_status_v else "❌",
+                "Diperbarui": all_status_v.get(v, {}).get("trained_at", "—"),
             }
             for v, cfg in villa_cfg.items()
         ]
@@ -2055,7 +2169,8 @@ def page_manajemen_data(villa_cfg: dict):
             if st.button("Hapus Vila (beserta data & model)", type="secondary"):
                 db_delete_villa(del_v)
                 del st.session_state.villa_config[del_v]
-                load_all_data.clear()
+                invalidate_data_caches()
+                invalidate_model_caches()
                 st.success(f"Vila `{del_v}` dihapus.")
                 st.rerun()
 
@@ -2737,9 +2852,11 @@ def main():
         st.info("Upload data melalui menu **Manajemen Data** (hanya Admin).")
         return
 
+    data_hash = db_get_data_hash()
+    villa_keys = tuple(sorted(clean_occ.keys()))
     with st.spinner("Analisis ADF & deteksi siklus..."):
-        villa_d, _ = run_adf_all(clean_occ, villa_cfg)
-        villa_m, _ = run_detect_m_all(clean_occ, villa_cfg)
+        villa_d, _ = run_adf_all_cached(clean_occ, villa_cfg, villa_keys, data_hash)
+        villa_m, _ = run_detect_m_all_cached(clean_occ, villa_cfg, villa_keys, data_hash)
 
     # ── SARIMA Models ──
     sarima_models: dict = {}
@@ -2750,7 +2867,7 @@ def main():
             sarima_models[villa] = cache[villa]
 
     for villa in [v for v in selected_villas if v not in sarima_models and v in clean_occ]:
-        mi = db_load_model(villa)
+        mi = db_load_model_cached(villa)
         if not mi:
             continue
         try:
@@ -2775,54 +2892,20 @@ def main():
             color_ = villa_cfg.get(villa, {}).get("color", "#2563EB")
             title_ = villa.replace("_villas", "").title()
 
-            n_test_ = max(int(len(monthly) * 0.20), 3)
-            split_idx_ = len(monthly) - n_test_
-            train_, test_ = monthly.iloc[:split_idx_], monthly.iloc[split_idx_:]
-
-            model_train_ = _fit_sarimax(train_, order, s_order)
-            pred_obj_ = model_train_.get_forecast(steps=len(test_))
-            pred_mean_ = pred_obj_.predicted_mean.clip(0, 100)
-            pred_ci_ = pred_obj_.conf_int(alpha=0.10)
-
-            if rmse_ is None:
-                rmse_ = compute_rmse(test_.values, pred_mean_.values)
-            if mape_ is None:
-                mape_ = compute_smape(test_.values, pred_mean_.values)
-
-            model_full_raw = _fit_sarimax(monthly, order, s_order)
-            train_fitted_ = model_train_.fittedvalues.clip(0, 100)
-            model_full_ = (
-                _AICWrapper(model_full_raw, aic_val) if aic_val is not None else model_full_raw
+            built = build_sarima_from_saved(
+                villa, order, s_order, d_val, m_val, color_, title_,
+                rmse_, mape_, aic_val, monthly, data_hash,
             )
-
-            sarima_models[villa] = {
-                **mi,
-                "model": model_full_,
-                "model_train": model_train_,
-                "order": order,
-                "seasonal_order": s_order,
-                "train": train_,
-                "test": test_,
-                "monthly": monthly,
-                "pred_mean": pred_mean_,
-                "pred_ci": pred_ci_,
-                "train_fitted": train_fitted_,
-                "rmse": rmse_,
-                "mape": mape_,
-                "smape": mape_,
-                "d": d_val,
-                "m": m_val,
-                "color": color_,
-                "title": title_,
-                "villa_key": villa,
-            }
+            sarima_models[villa] = {**mi, **built}
         except Exception:
             pass
 
     fore_info_all = {}
     for villa, info in sarima_models.items():
         try:
-            fore_info_all[villa] = make_forecast(info)
+            fore_info_all[villa] = make_forecast_cached(
+                villa, info["order"], info["seasonal_order"], data_hash, info
+            )
         except Exception:
             pass
 
