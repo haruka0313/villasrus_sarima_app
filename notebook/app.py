@@ -46,7 +46,7 @@ CI_ALPHA = 0.10
 
 AIC_VALID_MIN = 50.0
 LB_P_MIN = 0.05
-SMAPE_MAX = 80.0
+MAPE_MAX = 80.0
 RMSE_MAX = 50.0
 TOP_N_CANDIDATES = 10
 
@@ -1069,7 +1069,7 @@ def train_sarima(
                 selected_order = curr_order
                 selected_seasonal = curr_seasonal
                 model_status = f"⚠️ Fallback Rank #{rank}"
-            if mape_cand > SMAPE_MAX or rmse_cand > RMSE_MAX:
+            if mape_cand > MAPE_MAX or rmse_cand > RMSE_MAX:
                 continue
             if lb_p <= LB_P_MIN:
                 continue
@@ -1458,7 +1458,6 @@ def chart_model_fit(info: dict) -> go.Figure:
     pred_mean = info["pred_mean"]
     pred_ci = info["pred_ci"]
     color, title = info["color"], info["title"]
-    rmse_v = info["rmse"]
     mape_v = info.get("mape", info.get("mape", float("nan")))
 
     fig = go.Figure()
@@ -1502,7 +1501,7 @@ def chart_model_fit(info: dict) -> go.Figure:
             line=dict(color=color, width=2.2, dash="dash"),
             mode="lines+markers",
             marker=dict(size=6, symbol="square"),
-            name=f"Prediksi | RMSE={rmse_v:.1f}% | SMAPE={mape_label}",
+            name=f"Prediksi | MAPE={mape_label}",
             hovertemplate="<b>%{x|%b %Y}</b><br>Prediksi: %{y:.1f}%<extra></extra>",
         )
     )
@@ -1510,7 +1509,7 @@ def chart_model_fit(info: dict) -> go.Figure:
     apply_base(
         fig,
         title=dict(
-            text=f"{title} — {order_str} | d={info['d']} m={info['m']} | AIC={info['model'].aic:.1f}",
+            text=f"{title} — {order_str} | d={info['d']} m={info['m']}",
             font=dict(size=13, color="#1E3A5F"),
         ),
         yaxis=dict(title="Okupansi (%)", range=[-5, 115], ticksuffix="%", gridcolor="#F3F4F6"),
@@ -1730,11 +1729,11 @@ def model_quality_badge(mape: float) -> tuple[str, str]:
     if np.isnan(mape):
         return "⚪", "Belum dievaluasi"
     if mape < 10:
-        return "🟢", f"Sangat Baik (SMAPE={mape:.1f}%)"
+        return "🟢", f"Sangat Baik (MAPE={mape:.1f}%)"
     elif mape < 20:
-        return "🟡", f"Cukup Baik (SMAPE={mape:.1f}%)"
+        return "🟡", f"Cukup Baik (MAPE={mape:.1f}%)"
     else:
-        return "🔴", f"Perlu Review (SMAPE={mape:.1f}%)"
+        return "🔴", f"Perlu Review (MAPE={mape:.1f}%)"
 
 
 def period_filter(clean_occ: dict, key: str) -> tuple:
@@ -1926,7 +1925,7 @@ def page_dashboard(clean_occ: dict, villa_cfg: dict):
         }
         if is_admin and has_model:
             row["RMSE (%)"] = round(ms.get("rmse", 0) or 0, 2)
-            row["SMAPE (%)"] = round(ms.get("mape", 0) or 0, 2)
+            row["MAPE (%)"] = round(ms.get("mape", 0) or 0, 2)
         rows.append(row)
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -2349,7 +2348,7 @@ def page_strategi(
 
         with tabs[2]:
             section_header("Analisis Mendalam per Vila", "")
-            st.markdown("Setiap vila: **Dekomposisi → ADF & Siklus → ACF/PACF → Hasil Model**.")
+            st.markdown("Setiap vila: **Dekomposisi → ADF & Siklus → Hasil Model**.")
             st.divider()
             for villa in selected_villas:
                 if villa not in clean_occ:
@@ -2365,16 +2364,14 @@ def page_strategi(
                 n_months = len(monthly)
 
                 with st.expander(f"**{title_v}** · {area}", expanded=False):
-                    c1, c2, c3, c4, c5 = st.columns(5)
+                    c1, c2, c3, c4 = st.columns(4)
                     c1.metric("Rata-rata Okupansi", f"{mean_occ:.1f}%")
                     c2.metric("Data Historis", f"{n_months} bln")
                     c3.metric("d (differencing)", str(d_val))
                     c4.metric("m (seasonality)", str(m_val))
-                    if info:
-                        c5.metric("RMSE (Test Set)", f"{info.get('rmse', 0):.1f}%")
                     st.divider()
-                    t1, t2, t3, t4 = st.tabs(
-                        ["📈 Dekomposisi", " ADF & Siklus", "📉 ACF/PACF", " Hasil Model"]
+                    t1, t2, t3 = st.tabs(
+                        ["Dekomposisi", " ADF & Siklus", " Hasil Model"]
                     )
                     with t1:
                         if n_months < 24:
@@ -2466,70 +2463,15 @@ def page_strategi(
                             st.plotly_chart(fig_pg, use_container_width=True)
 
                     with t3:
-                        # Samakan dengan notebook: ACF/PACF dihitung dari data
-                        # yang sudah di-differencing sesuai d_val (bukan data mentah)
-                        series_stat = monthly.diff().dropna() if d_val > 0 else monthly
-                        fig_ap = chart_acf_pacf(series_stat, m_val, color, title_v)
-                        st.plotly_chart(fig_ap, use_container_width=True)
-                        n = len(series_stat)
-                        conf = 1.96 / np.sqrt(n)
-                        max_lag_acf = min(24, n - 1)
-                        max_lag_pacf = min(int(n / 2) - 1, 12)
-                        acf_v, _ = sm_acf(series_stat, nlags=max_lag_acf, fft=True, alpha=0.05)
-                        pac_v, _ = sm_pacf(series_stat, nlags=max_lag_pacf, alpha=0.05, method="ywm")
-                        sig_acf = [i for i, v in enumerate(acf_v[1:], 1) if abs(v) > conf]
-                        sig_pacf = [i for i, v in enumerate(pac_v[1:], 1) if abs(v) > conf]
-                        c_a, c_p = st.columns(2)
-                        with c_a:
-                            st.markdown("**Lag signifikan ACF:**")
-                            if sig_acf:
-                                st.write(", ".join([f"`{l}`" for l in sig_acf[:12]]))
-                                if any(l % m_val == 0 for l in sig_acf[:18]):
-                                    st.success(f"✅ Lag kelipatan {m_val} signifikan → pola musiman")
-                            else:
-                                st.info("Tidak ada lag signifikan")
-                        with c_p:
-                            st.markdown("**Lag signifikan PACF:**")
-                            if sig_pacf:
-                                st.write(", ".join([f"`{l}`" for l in sig_pacf[:12]]))
-                            else:
-                                st.info("Tidak ada lag signifikan")
-                        st.caption(f"Threshold: ±{conf:.3f}")
-
-                    with t4:
                         if not info:
                             st.info("⏳ Model belum dilatih.")
                         else:
                             p, d_o, q = info["order"]
                             P, D, Q, ms = info["seasonal_order"]
-                            cm1, cm2, cm3, cm4 = st.columns(4)
+                            cm1, cm2 = st.columns(2)
                             cm1.metric("Order", f"({p},{d_o},{q})")
                             cm2.metric("Seasonal", f"({P},{D},{Q})[{ms}]")
-                            cm3.metric("AIC (full)", f"{info['model'].aic:.1f}")
-                            cm4.metric("RMSE (Test Set)", f"{info.get('rmse', 0):.2f}%")
                             st.plotly_chart(chart_model_fit(info), use_container_width=True)
-                            st.plotly_chart(chart_residual(info), use_container_width=True)
-                            st.markdown("**Interpretasi Model:**")
-                            pts = []
-                            if p > 0:
-                                pts.append(f"**AR({p})**: Hunian dipengaruhi {p} bulan sebelumnya")
-                            if d_o > 0:
-                                pts.append(f"**I({d_o})**: Data di-differencing (stasioner)")
-                            if q > 0:
-                                pts.append(f"**MA({q})**: Koreksi {q} error prediksi sebelumnya")
-                            if P > 0 or Q > 0:
-                                pts.append(f"**Seasonal ({P},{D},{Q})[{ms}]**: Pola musiman tiap {ms} bulan")
-                            for pt in pts:
-                                st.markdown(f"- {pt}")
-                            mape_v = info.get("mape", float("nan"))
-                            rmse_v = info.get("rmse", 0)
-                            mq_i, mq_l = model_quality_badge(mape_v)
-                            if not np.isnan(mape_v) and mape_v < 20:
-                                st.success(f"{mq_i} {mq_l} | RMSE={rmse_v:.1f}%")
-                            elif not np.isnan(mape_v) and mape_v < 30:
-                                st.warning(f"{mq_i} {mq_l} | RMSE={rmse_v:.1f}%")
-                            else:
-                                st.error(f"{mq_i} Pertimbangkan retrain atau tambah data historis.")
 
         with tabs[3]:
             section_header("Training Model SARIMA", "🚀")
@@ -2546,7 +2488,7 @@ def page_strategi(
                             "Order": str(ov["order"]),
                             "Seasonal Order": str(ov["seasonal_order"]),
                             "RMSE (%)": ov["rmse_override"],
-                            "SMAPE (%)": ov["mape_override"],
+                            "MAPE (%)": ov["mape_override"],
                         }
                     )
                 if ov_rows:
@@ -2626,7 +2568,7 @@ def page_strategi(
                                     "AIC": round(info_tr["model"].aic, 4),
                                     "AIC Valid": "✅" if is_valid_aic(info_tr["model"].aic) else "⚠️",
                                     "RMSE (%)": round(info_tr.get("rmse", 0), 4),
-                                    "SMAPE (%)": round(info_tr.get("mape", 0), 4),
+                                    "MAPE (%)": round(info_tr.get("mape", 0), 4),
                                     "Status": "✅ Berhasil",
                                 }
                             )
