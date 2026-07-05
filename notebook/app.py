@@ -1420,9 +1420,9 @@ def chart_decomposition(
 def chart_acf_pacf(series_stat: pd.Series, m: int, color: str, title: str) -> go.Figure:
     series_stat = series_stat.dropna()
     n = len(series_stat)
-    conf = 1.96 / np.sqrt(n)
-    max_lag_acf = min(24, n - 1)
-    max_lag_pacf = min(int(n / 2) - 1, 12)
+    conf = 1.96 / np.sqrt(max(n, 2))
+    max_lag_acf = max(1, min(24, n - 1))
+    max_lag_pacf = max(1, min(int(n / 2) - 1, 12))
     acf_vals, _ = sm_acf(series_stat, nlags=max_lag_acf, alpha=0.05, fft=True)
     pacf_vals, _ = sm_pacf(series_stat, nlags=max_lag_pacf, alpha=0.05, method="ywm")
     fig = make_subplots(
@@ -1451,7 +1451,6 @@ def chart_acf_pacf(series_stat: pd.Series, m: int, color: str, title: str) -> go
         fig.update_yaxes(gridcolor="#F3F4F6", row=1, col=col_i)
     apply_base(fig, height=300, showlegend=False)
     return fig
-
 
 def chart_model_fit(info: dict) -> go.Figure:
     train, test = info["train"], info["test"]
@@ -2348,7 +2347,7 @@ def page_strategi(
 
         with tabs[2]:
             section_header("Analisis Mendalam per Vila", "")
-            st.markdown("Setiap vila: **Dekomposisi → ADF & Siklus → Hasil Model**.")
+            st.markdown("Setiap vila: **Dekomposisi → ADF & ACF + PACF → Hasil Model**.")
             st.divider()
             for villa in selected_villas:
                 if villa not in clean_occ:
@@ -2368,7 +2367,7 @@ def page_strategi(
                     c1.metric("Rata-rata Okupansi", f"{mean_occ:.1f}%")
                     c2.metric("Data Historis", f"{n_months} bln")
                     c3.metric("d (differencing)", str(d_val))
-                    c4.metric("m (seasonality)", str(m_val))
+                    c4.metric("s (seasonality)", str(m_val))
                     st.divider()
                     t1, t2, t3 = st.tabs(
                         ["Dekomposisi", " ADF & Siklus", " Hasil Model"]
@@ -2461,6 +2460,17 @@ def page_strategi(
                                 margin=dict(l=50, r=30, t=20, b=40),
                             )
                             st.plotly_chart(fig_pg, use_container_width=True)
+
+
+                        st.divider()
+                        st.markdown("#### ACF & PACF (Series Stasioner)")
+                        series_stat = monthly.diff(d_val).dropna() if d_val > 0 else monthly
+                        fig_acf_pacf = chart_acf_pacf(series_stat, m_val, color, title_v)
+                        st.plotly_chart(fig_acf_pacf, use_container_width=True)
+                        st.caption(
+                            f"Garis putus-putus abu-abu = batas signifikansi 95%. "
+                            f"Garis titik-titik berwarna = kelipatan lag musiman m={m_val}."
+                        )
 
                     with t3:
                         if not info:
