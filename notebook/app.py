@@ -1417,11 +1417,14 @@ def chart_decomposition(
     return fig
 
 
-def chart_acf_pacf(monthly: pd.Series, m: int, color: str, title: str) -> go.Figure:
-    n = len(monthly)
+def chart_acf_pacf(series_stat: pd.Series, m: int, color: str, title: str) -> go.Figure:
+    series_stat = series_stat.dropna()
+    n = len(series_stat)
     conf = 1.96 / np.sqrt(n)
-    acf_vals, _ = sm_acf(monthly, nlags=min(36, n - 1), alpha=0.05, fft=True)
-    pacf_vals, _ = sm_pacf(monthly, nlags=min(36, n // 2 - 1), alpha=0.05)
+    max_lag_acf = min(24, n - 1)
+    max_lag_pacf = min(int(n / 2) - 1, 12)
+    acf_vals, _ = sm_acf(series_stat, nlags=max_lag_acf, alpha=0.05, fft=True)
+    pacf_vals, _ = sm_pacf(series_stat, nlags=max_lag_pacf, alpha=0.05, method="ywm")
     fig = make_subplots(
         rows=1, cols=2,
         subplot_titles=[f"ACF — {title}", f"PACF — {title}"],
@@ -2463,12 +2466,17 @@ def page_strategi(
                             st.plotly_chart(fig_pg, use_container_width=True)
 
                     with t3:
-                        fig_ap = chart_acf_pacf(monthly, m_val, color, title_v)
+                        # Samakan dengan notebook: ACF/PACF dihitung dari data
+                        # yang sudah di-differencing sesuai d_val (bukan data mentah)
+                        series_stat = monthly.diff().dropna() if d_val > 0 else monthly
+                        fig_ap = chart_acf_pacf(series_stat, m_val, color, title_v)
                         st.plotly_chart(fig_ap, use_container_width=True)
-                        n = len(monthly)
+                        n = len(series_stat)
                         conf = 1.96 / np.sqrt(n)
-                        acf_v, _ = sm_acf(monthly, nlags=min(36, n - 1), fft=True, alpha=0.05)
-                        pac_v, _ = sm_pacf(monthly, nlags=min(36, n // 2 - 1), alpha=0.05)
+                        max_lag_acf = min(24, n - 1)
+                        max_lag_pacf = min(int(n / 2) - 1, 12)
+                        acf_v, _ = sm_acf(series_stat, nlags=max_lag_acf, fft=True, alpha=0.05)
+                        pac_v, _ = sm_pacf(series_stat, nlags=max_lag_pacf, alpha=0.05, method="ywm")
                         sig_acf = [i for i, v in enumerate(acf_v[1:], 1) if abs(v) > conf]
                         sig_pacf = [i for i, v in enumerate(pac_v[1:], 1) if abs(v) > conf]
                         c_a, c_p = st.columns(2)
