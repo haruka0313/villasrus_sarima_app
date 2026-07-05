@@ -1,4 +1,4 @@
-﻿Date,Arrivals,Arriving Guests,Departures,Departing Guests,Stay through,Staying Guests,Booked,Booked Guests,Available,Black,Occupancy Total
+Date,Arrivals,Arriving Guests,Departures,Departing Guests,Stay through,Staying Guests,Booked,Booked Guests,Available,Black,Occupancy Total
 Sun 1 Jan 2023,0,0,0,0,1,4,1,4,0,0,100%
 Mon 2 Jan 2023,0,0,0,0,1,4,1,4,0,0,100%
 Tue 3 Jan 2023,0,0,1,4,0,0,0,0,1,0,0%
@@ -1095,4 +1095,3 @@ Sun 28 Dec 2025,0,0,0,0,1,2,1,2,0,0,100%
 Mon 29 Dec 2025,0,0,0,0,1,2,1,2,0,0,100%
 Tue 30 Dec 2025,0,0,0,0,1,2,1,2,0,0,100%
 Wed 31 Dec 2025,0,0,0,0,1,2,1,2,0,0,100%
-Total,158,479,158,481,609,1914,767,2393,329,0,70%

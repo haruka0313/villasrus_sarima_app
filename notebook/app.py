@@ -1,7 +1,3 @@
-# ══════════════════════════════════════════════════════════════
-# IMPORTS
-# ══════════════════════════════════════════════════════════════
-
 import hashlib
 import io
 import json
@@ -38,10 +34,6 @@ except ImportError:
 
 warnings.filterwarnings("ignore")
 load_dotenv()
-
-# ══════════════════════════════════════════════════════════════
-# KONSTANTA & KONFIGURASI
-# ══════════════════════════════════════════════════════════════
 
 FORECAST_STEPS = 6
 MIN_SEASONAL_TRAIN = 24
@@ -86,19 +78,16 @@ OCCUPANCY_ATTRS = [
     "available", "black", "occupancy_total",
 ]
 
-# ══════════════════════════════════════════════════════════════
-# SARIMA OVERRIDE & AIC WRAPPER
-# ══════════════════════════════════════════════════════════════
-
+# konfigurasi model per vila yang sudah divalidasi manual dari notebook v3
 SARIMA_OVERRIDE: dict = {
     "briana_villas": {
         "order": (2, 1, 2),
         "seasonal_order": (0, 1, 2, 7),
         "aic_override": 78.9302,
         "rmse_override": 17.52,
-        "smape_override": 18.99,
+        "mape_override": 18.99,
         "rmse_train": 22.69,
-        "smape_train": 29.76,
+        "mape_train": 29.76,
         "forecast_override": {
             "dates": [
                 "2026-01-01", "2026-02-01", "2026-03-01",
@@ -114,9 +103,9 @@ SARIMA_OVERRIDE: dict = {
         "seasonal_order": (2, 1, 0, 7),
         "aic_override": 91.1927,
         "rmse_override": 19.50,
-        "smape_override": 28.58,
+        "mape_override": 28.58,
         "rmse_train": 27.47,
-        "smape_train": 25.70,
+        "mape_train": 25.70,
         "forecast_override": {
             "dates": [
                 "2026-01-01", "2026-02-01", "2026-03-01",
@@ -132,9 +121,9 @@ SARIMA_OVERRIDE: dict = {
         "seasonal_order": (2, 1, 0, 4),
         "aic_override": 204.2904,
         "rmse_override": 23.04,
-        "smape_override": 45.64,
+        "mape_override": 45.64,
         "rmse_train": 36.36,
-        "smape_train": 103.18,
+        "mape_train": 103.18,
         "forecast_override": {
             "dates": [
                 "2026-01-01", "2026-02-01", "2026-03-01",
@@ -150,9 +139,9 @@ SARIMA_OVERRIDE: dict = {
         "seasonal_order": (1, 1, 2, 5),
         "aic_override": 160.178,
         "rmse_override": 24.58,
-        "smape_override": 27.10,
+        "mape_override": 27.10,
         "rmse_train": 19.40,
-        "smape_train": 25.05,
+        "mape_train": 25.05,
         "forecast_override": {
             "dates": [
                 "2026-01-01", "2026-02-01", "2026-03-01",
@@ -168,9 +157,9 @@ SARIMA_OVERRIDE: dict = {
         "seasonal_order": (0, 1, 2, 6),
         "aic_override": 127.2369,
         "rmse_override": 19.93,
-        "smape_override": 22.19,
+        "mape_override": 22.19,
         "rmse_train": 32.12,
-        "smape_train": 58.12,
+        "mape_train": 58.12,
         "forecast_override": {
             "dates": [
                 "2026-01-01", "2026-02-01", "2026-03-01",
@@ -186,9 +175,9 @@ SARIMA_OVERRIDE: dict = {
         "seasonal_order": (2, 1, 0, 4),
         "aic_override": 187.9674,
         "rmse_override": 36.45,
-        "smape_override": 50.55,
+        "mape_override": 50.55,
         "rmse_train": 22.04,
-        "smape_train": 29.65,
+        "mape_train": 29.65,
         "forecast_override": {
             "dates": [
                 "2026-01-01", "2026-02-01", "2026-03-01",
@@ -204,9 +193,9 @@ SARIMA_OVERRIDE: dict = {
         "seasonal_order": (0, 1, 2, 6),
         "aic_override": 132.0641,
         "rmse_override": 15.81,
-        "smape_override": 19.61,
+        "mape_override": 19.61,
         "rmse_train": 34.73,
-        "smape_train": 64.90,
+        "mape_train": 64.90,
         "forecast_override": {
             "dates": [
                 "2026-01-01", "2026-02-01", "2026-03-01",
@@ -221,10 +210,7 @@ SARIMA_OVERRIDE: dict = {
 
 
 class _AICWrapper:
-    """
-    Membungkus model SARIMAX dan mengganti nilai .aic-nya
-    dengan angka yang sudah divalidasi dari notebook.
-    """
+    # ganti nilai .aic bawaan statsmodels dengan angka yang sudah divalidasi
     def __init__(self, model, aic_value: float):
         self._model = model
         self._aic = aic_value
@@ -236,10 +222,6 @@ class _AICWrapper:
     def __getattr__(self, name):
         return getattr(self._model, name)
 
-# ══════════════════════════════════════════════════════════════
-# SUPABASE CLIENT
-# ══════════════════════════════════════════════════════════════
-
 
 @st.cache_resource
 def get_supabase() -> Client:
@@ -250,19 +232,11 @@ def get_supabase() -> Client:
         st.stop()
     return create_client(url, key)
 
-# ══════════════════════════════════════════════════════════════
-# UTILITAS WARNA
-# ══════════════════════════════════════════════════════════════
-
 
 def hex_rgba(hex_color: str, alpha: float = 0.15) -> str:
     h = hex_color.lstrip("#")
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     return f"rgba({r},{g},{b},{alpha})"
-
-# ══════════════════════════════════════════════════════════════
-# AIC VALIDATION
-# ══════════════════════════════════════════════════════════════
 
 
 def is_valid_aic(aic_value: float, min_val: float = AIC_VALID_MIN) -> bool:
@@ -275,10 +249,6 @@ def is_valid_aic(aic_value: float, min_val: float = AIC_VALID_MIN) -> bool:
     if aic_value < 60 and aic_value == int(aic_value) and int(aic_value) % 2 == 0:
         return False
     return True
-
-# ══════════════════════════════════════════════════════════════
-# DATABASE — INIT & SEED
-# ══════════════════════════════════════════════════════════════
 
 
 def init_db():
@@ -293,10 +263,6 @@ def init_db():
         sb.table("villa_config").insert(
             [{"villa": v, "area": a, "color": c} for v, a, c in DEFAULT_VILLAS]
         ).execute()
-
-# ══════════════════════════════════════════════════════════════
-# DATABASE — HELPERS
-# ══════════════════════════════════════════════════════════════
 
 
 def _hash_pw(pw: str) -> str:
@@ -572,9 +538,10 @@ def db_load_model(villa: str) -> dict | None:
     except Exception:
         return None
 
+
 @st.cache_data(show_spinner=False, ttl=300)
 def db_get_all_model_status() -> dict:
-    """1 query untuk status semua model (hindari N+1)."""
+    # satu query untuk status semua model, biar tidak N+1
     sb = get_supabase()
     res = (
         sb.table("models")
@@ -586,13 +553,12 @@ def db_get_all_model_status() -> dict:
 
 @st.cache_data(show_spinner=False, ttl=1800)
 def db_load_model_cached(villa: str) -> dict | None:
-    """Cache hasil download pkl model 30 menit."""
     return db_load_model(villa)
 
 
 @st.cache_data(show_spinner=False, ttl=300)
 def db_get_data_hash() -> str:
-    """1 query untuk semua vila — dipakai sebagai cache-invalidation key."""
+    # dipakai sebagai key invalidasi cache
     sb = get_supabase()
     res = (
         sb.table("raw_data")
@@ -605,7 +571,6 @@ def db_get_data_hash() -> str:
 
 
 def invalidate_model_caches():
-    """Panggil setelah training/hapus model."""
     db_get_all_model_status.clear()
     db_load_model_cached.clear()
     try:
@@ -615,9 +580,9 @@ def invalidate_model_caches():
 
 
 def invalidate_data_caches():
-    """Panggil setelah upload/hapus data mentah."""
     load_all_data.clear()
     db_get_data_hash.clear()
+
 
 def db_model_exists(villa: str) -> bool:
     sb = get_supabase()
@@ -693,10 +658,6 @@ def get_model_log() -> list[dict]:
         .execute()
     )
     return res.data or []
-
-# ══════════════════════════════════════════════════════════════
-# DATA CLEANING & PARSING
-# ══════════════════════════════════════════════════════════════
 
 
 def _find_col(df: pd.DataFrame, keywords: list[str]) -> str | None:
@@ -798,10 +759,6 @@ def clean_occupancy(df: pd.DataFrame) -> pd.Series:
     series = series.clip(0, 100)
     return series
 
-# ══════════════════════════════════════════════════════════════
-# LOAD DATA (cached)
-# ══════════════════════════════════════════════════════════════
-
 
 @st.cache_data(show_spinner=False)
 def load_all_data(_villa_cfg_json: str) -> dict:
@@ -815,10 +772,6 @@ def load_all_data(_villa_cfg_json: str) -> dict:
             except Exception:
                 pass
     return occ_dict
-
-# ══════════════════════════════════════════════════════════════
-# ANALISIS STATISTIK
-# ══════════════════════════════════════════════════════════════
 
 
 def adf_test(series: pd.Series) -> dict:
@@ -886,7 +839,7 @@ def compute_rmse(actual, predicted) -> float:
     return float(np.sqrt(mean_squared_error(actual, predicted)))
 
 
-def compute_smape(actual: np.ndarray, predicted: np.ndarray) -> float:
+def compute_mape(actual: np.ndarray, predicted: np.ndarray) -> float:
     actual = np.array(actual, dtype=float)
     predicted = np.array(predicted, dtype=float)
     denom = (np.abs(actual) + np.abs(predicted)) / 2.0
@@ -895,7 +848,7 @@ def compute_smape(actual: np.ndarray, predicted: np.ndarray) -> float:
 
 
 def compute_mape(actual: np.ndarray, predicted: np.ndarray) -> float:
-    return compute_smape(actual, predicted)
+    return compute_mape(actual, predicted)
 
 
 def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
@@ -965,9 +918,6 @@ def run_adf_all_cached(_clean_occ: dict, _villa_cfg: dict, villa_keys: tuple, da
 @st.cache_data(show_spinner=False)
 def run_detect_m_all_cached(_clean_occ: dict, _villa_cfg: dict, villa_keys: tuple, data_hash: str):
     return run_detect_m_all(_clean_occ, _villa_cfg)
-# ══════════════════════════════════════════════════════════════
-# SARIMA — TRAINING & FORECAST
-# ══════════════════════════════════════════════════════════════
 
 
 def _fit_sarimax(data, order, seasonal_order, **kwargs):
@@ -991,7 +941,6 @@ def train_sarima(
     monthly = series.resample("MS").mean().dropna()
     use_seasonal = len(monthly) >= MIN_SEASONAL_TRAIN
 
-    # ── CEK OVERRIDE DULU sebelum auto-training
     if villa_key and villa_key in SARIMA_OVERRIDE:
         ov = SARIMA_OVERRIDE[villa_key]
         selected_order = ov["order"]
@@ -1028,15 +977,14 @@ def train_sarima(
             "pred_ci": pred_ci,
             "train_fitted": train_fitted,
             "rmse": ov["rmse_override"],
-            "mape": ov["smape_override"],
-            "smape": ov["smape_override"],
+            "mape": ov["mape_override"],
+            "mape": ov["mape_override"],
             "color": color,
             "title": title,
             "villa_key": villa_key,
             "model_status": f"✅ Preset Notebook v3 — {selected_order}×{selected_seasonal}",
         }
 
-    # ── AUTO-TRAINING untuk villa tanpa override ──────────────
     n_test = max(int(len(monthly) * 0.20), 3)
     split_idx = len(monthly) - n_test
     train, test = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
@@ -1113,7 +1061,7 @@ def train_sarima(
             if pred_mean.isna().any() or (pred_mean > 100).all():
                 continue
             rmse_cand = compute_rmse(test.values, pred_mean.values)
-            smape_cand = compute_smape(test.values, pred_mean.values)
+            mape_cand = compute_mape(test.values, pred_mean.values)
             lb_res = acorr_ljungbox(m_tr.resid.dropna(), lags=[lb_lag], return_df=True)
             lb_p = float(lb_res["lb_pvalue"].iloc[0])
             if selected_model is None:
@@ -1121,7 +1069,7 @@ def train_sarima(
                 selected_order = curr_order
                 selected_seasonal = curr_seasonal
                 model_status = f"⚠️ Fallback Rank #{rank}"
-            if smape_cand > SMAPE_MAX or rmse_cand > RMSE_MAX:
+            if mape_cand > SMAPE_MAX or rmse_cand > RMSE_MAX:
                 continue
             if lb_p <= LB_P_MIN:
                 continue
@@ -1149,7 +1097,7 @@ def train_sarima(
     final_pred = selected_model.get_forecast(steps=len(test)).predicted_mean.clip(0, 100)
     pred_ci = selected_model.get_forecast(steps=len(test)).conf_int(alpha=CI_ALPHA)
     rmse_val = compute_rmse(test.values, final_pred.values)
-    smape_val = compute_smape(test.values, final_pred.values)
+    mape_val = compute_mape(test.values, final_pred.values)
     train_fitted = selected_model.fittedvalues.clip(0, 100)
 
     try:
@@ -1172,18 +1120,19 @@ def train_sarima(
         "pred_ci": pred_ci,
         "train_fitted": train_fitted,
         "rmse": rmse_val,
-        "mape": smape_val,
-        "smape": smape_val,
+        "mape": mape_val,
+        "mape": mape_val,
         "color": color,
         "title": title,
         "villa_key": villa_key,
         "model_status": model_status,
     }
 
+
 @st.cache_resource(show_spinner=False, ttl=3600)
 def build_sarima_from_saved(villa, order, seasonal_order, d_val, m_val, color_, title_,
                              rmse_, mape_, aic_val, _monthly, data_hash):
-    """Refit model dari data tersimpan, di-cache lintas sesi."""
+    # refit dari data tersimpan, hasilnya dicache lintas sesi
     monthly = _monthly
     n_test_ = max(int(len(monthly) * 0.20), 3)
     split_idx_ = len(monthly) - n_test_
@@ -1195,7 +1144,7 @@ def build_sarima_from_saved(villa, order, seasonal_order, d_val, m_val, color_, 
     pred_ci_ = pred_obj_.conf_int(alpha=0.10)
 
     rmse_val = rmse_ if rmse_ is not None else compute_rmse(test_.values, pred_mean_.values)
-    mape_val = mape_ if mape_ is not None else compute_smape(test_.values, pred_mean_.values)
+    mape_val = mape_ if mape_ is not None else compute_mape(test_.values, pred_mean_.values)
 
     model_full_raw = _fit_sarimax(monthly, order, seasonal_order)
     train_fitted_ = model_train_.fittedvalues.clip(0, 100)
@@ -1216,16 +1165,19 @@ def build_sarima_from_saved(villa, order, seasonal_order, d_val, m_val, color_, 
         "train_fitted": train_fitted_,
         "rmse": rmse_val,
         "mape": mape_val,
-        "smape": mape_val,
+        "mape": mape_val,
         "d": d_val,
         "m": m_val,
         "color": color_,
         "title": title_,
         "villa_key": villa,
     }
+
+
 @st.cache_data(show_spinner=False, ttl=3600)
 def make_forecast_cached(villa: str, order, seasonal_order, data_hash: str, _info: dict) -> dict:
     return make_forecast(_info)
+
 
 def make_forecast(info: dict) -> dict:
     villa_key = info.get("villa_key", "")
@@ -1315,11 +1267,6 @@ def make_forecast(info: dict) -> dict:
         "used_s_order": s_order,
         "is_flat": is_flat,
     }
-
-
-# ══════════════════════════════════════════════════════════════
-# PLOTLY — BASE LAYOUT & CHART FUNCTIONS
-# ══════════════════════════════════════════════════════════════
 
 
 BASE_LAYOUT = dict(
@@ -1509,7 +1456,7 @@ def chart_model_fit(info: dict) -> go.Figure:
     pred_ci = info["pred_ci"]
     color, title = info["color"], info["title"]
     rmse_v = info["rmse"]
-    smape_v = info.get("smape", info.get("mape", float("nan")))
+    mape_v = info.get("mape", info.get("mape", float("nan")))
 
     fig = go.Figure()
     fig.add_trace(
@@ -1545,14 +1492,14 @@ def chart_model_fit(info: dict) -> go.Figure:
         fig.add_vline(
             x=test.index[0].isoformat(), line_color="#9CA3AF", line_width=1.2, line_dash="dot"
         )
-    smape_label = f"{smape_v:.1f}%" if not np.isnan(smape_v) else "—"
+    mape_label = f"{mape_v:.1f}%" if not np.isnan(mape_v) else "—"
     fig.add_trace(
         go.Scatter(
             x=pred_mean.index, y=pred_mean.values,
             line=dict(color=color, width=2.2, dash="dash"),
             mode="lines+markers",
             marker=dict(size=6, symbol="square"),
-            name=f"Prediksi | RMSE={rmse_v:.1f}% | SMAPE={smape_label}",
+            name=f"Prediksi | RMSE={rmse_v:.1f}% | SMAPE={mape_label}",
             hovertemplate="<b>%{x|%b %Y}</b><br>Prediksi: %{y:.1f}%<extra></extra>",
         )
     )
@@ -1739,10 +1686,6 @@ def chart_residual(info: dict) -> go.Figure:
     )
     return fig
 
-# ══════════════════════════════════════════════════════════════
-# KOMPONEN UI BERSAMA
-# ══════════════════════════════════════════════════════════════
-
 
 def kpi_card(label: str, value: str, sub: str = "", color: str = "#2563EB"):
     st.markdown(
@@ -1844,10 +1787,6 @@ def filter_occ(clean_occ: dict, ds, de) -> dict:
         if len(s[(s.index >= ds) & (s.index <= end_)]) > 0
     }
 
-# ══════════════════════════════════════════════════════════════
-# HALAMAN — LOGIN
-# ══════════════════════════════════════════════════════════════
-
 
 def page_login():
     st.markdown(
@@ -1901,10 +1840,6 @@ def page_login():
             else:
                 ok, msg = db_register(nu, np_)
                 st.success(msg + " Silakan login.") if ok else st.error(msg)
-
-# ══════════════════════════════════════════════════════════════
-# HALAMAN — DASHBOARD UTAMA
-# ══════════════════════════════════════════════════════════════
 
 
 def page_dashboard(clean_occ: dict, villa_cfg: dict):
@@ -1970,7 +1905,7 @@ def page_dashboard(clean_occ: dict, villa_cfg: dict):
     with col_right:
         st.plotly_chart(chart_bar_mean(clean_occ, villa_cfg), use_container_width=True)
 
-    section_header("Status Vila", "🏡")
+    section_header("Status Vila", "")
     rows = []
     for villa, cfg in villa_cfg.items():
         has_data = villa in clean_occ
@@ -1992,10 +1927,6 @@ def page_dashboard(clean_occ: dict, villa_cfg: dict):
         rows.append(row)
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-# ══════════════════════════════════════════════════════════════
-# HALAMAN — MANAJEMEN DATA (Admin only)
-# ══════════════════════════════════════════════════════════════
-
 
 def page_manajemen_data(villa_cfg: dict):
     st.markdown(
@@ -2005,11 +1936,11 @@ def page_manajemen_data(villa_cfg: dict):
         unsafe_allow_html=True,
     )
     tab_upload, tab_preview, tab_vila, tab_user = st.tabs(
-        ["📤 Upload Data", "🔍 Preview & Hapus", "🏡 Kelola Vila", "👥 Kelola User"]
+        [" Upload Data", " Preview & Hapus", " Kelola Vila", " Kelola User"]
     )
 
     with tab_upload:
-        section_header("Upload Data Okupansi dari Beds24", "📤")
+        section_header("Upload Data Okupansi dari Beds24", "")
         st.info(
             "**Format yang diterima:**\n"
             "- Kolom tanggal: `date`, `tanggal`, atau `tgl`\n"
@@ -2071,7 +2002,7 @@ def page_manajemen_data(villa_cfg: dict):
             st.info("Belum ada data tersimpan di database.")
 
     with tab_preview:
-        section_header("Preview Data Okupansi", "🔍")
+        section_header("Preview Data Okupansi", "")
         if not villa_cfg:
             st.info("Belum ada vila terdaftar.")
         else:
@@ -2175,7 +2106,7 @@ def page_manajemen_data(villa_cfg: dict):
                 st.rerun()
 
     with tab_user:
-        section_header("Daftar User", "👥")
+        section_header("Daftar User", "")
         st.dataframe(pd.DataFrame(db_get_users()), use_container_width=True, hide_index=True)
 
         section_header("Tambah User Baru", "➕")
@@ -2207,10 +2138,6 @@ def page_manajemen_data(villa_cfg: dict):
                 use_container_width=True, hide_index=True,
             )
 
-# ══════════════════════════════════════════════════════════════
-# HALAMAN — PREDIKSI HUNIAN
-# ══════════════════════════════════════════════════════════════
-
 
 def page_strategi(
     clean_occ: dict,
@@ -2233,9 +2160,9 @@ def page_strategi(
         tabs = st.tabs(
             [
                 "Prediksi Okupansi Villa",
-                "🔬 Analisis Teknis (EDA)",
-                "🤖 Analisis per Vila",
-                "🚀 Train Model",
+                " Analisis Teknis (EDA)",
+                " Analisis per Vila",
+                " Train Model",
             ]
         )
     else:
@@ -2250,7 +2177,7 @@ def page_strategi(
                     st.markdown("""
                     ### 🔧 Panduan untuk Admin
                     1. ✅ **Upload Data Okupansi** → menu ** Manajemen Data**
-                    2. ✅ **Latih Model SARIMA** → tab **🚀 Train Model**
+                    2. ✅ **Latih Model SARIMA** → tab **Train Model**
                     3. ✅ **Pilih Vila & Mulai Training**
                     4. ✅ **Refresh Halaman**
                     """)
@@ -2341,7 +2268,7 @@ def page_strategi(
 
     if is_admin:
         with tabs[1]:
-            section_header("Exploratory Data Analysis — Time Series Bulanan", "🔬")
+            section_header("Exploratory Data Analysis — Time Series Bulanan", "")
             ds_e, de_e = period_filter(clean_occ, "eda")
             clean_occ_e = filter_occ(clean_occ, ds_e, de_e)
             st.divider()
@@ -2418,7 +2345,7 @@ def page_strategi(
                 st.plotly_chart(fig_e, use_container_width=True)
 
         with tabs[2]:
-            section_header("Analisis Mendalam per Vila", "🏡")
+            section_header("Analisis Mendalam per Vila", "")
             st.markdown("Setiap vila: **Dekomposisi → ADF & Siklus → ACF/PACF → Hasil Model**.")
             st.divider()
             for villa in selected_villas:
@@ -2444,7 +2371,7 @@ def page_strategi(
                         c5.metric("RMSE (Test Set)", f"{info.get('rmse', 0):.1f}%")
                     st.divider()
                     t1, t2, t3, t4 = st.tabs(
-                        ["📈 Dekomposisi", "🔬 ADF & Siklus", "📉 ACF/PACF", "🤖 Hasil Model"]
+                        ["📈 Dekomposisi", " ADF & Siklus", "📉 ACF/PACF", " Hasil Model"]
                     )
                     with t1:
                         if n_months < 24:
@@ -2611,7 +2538,7 @@ def page_strategi(
                             "Order": str(ov["order"]),
                             "Seasonal Order": str(ov["seasonal_order"]),
                             "RMSE (%)": ov["rmse_override"],
-                            "SMAPE (%)": ov["smape_override"],
+                            "SMAPE (%)": ov["mape_override"],
                         }
                     )
                 if ov_rows:
@@ -2647,7 +2574,7 @@ def page_strategi(
                     help="Centang untuk melatih ulang vila yang sudah punya model",
                 )
 
-            if st.button("🚀 Mulai Training", type="primary", use_container_width=True):
+            if st.button("Mulai Training", type="primary", use_container_width=True):
                 to_train = [v for v in train_sel if force or not db_model_exists(v)]
                 skipped = [v for v in train_sel if not force and db_model_exists(v)]
                 if skipped:
@@ -2691,7 +2618,7 @@ def page_strategi(
                                     "AIC": round(info_tr["model"].aic, 4),
                                     "AIC Valid": "✅" if is_valid_aic(info_tr["model"].aic) else "⚠️",
                                     "RMSE (%)": round(info_tr.get("rmse", 0), 4),
-                                    "SMAPE (%)": round(info_tr.get("smape", 0), 4),
+                                    "SMAPE (%)": round(info_tr.get("mape", 0), 4),
                                     "Status": "✅ Berhasil",
                                 }
                             )
@@ -2708,10 +2635,6 @@ def page_strategi(
                 logs_m = get_model_log()
                 if logs_m:
                     st.dataframe(pd.DataFrame(logs_m), use_container_width=True, hide_index=True)
-
-# ══════════════════════════════════════════════════════════════
-# MAIN
-# ══════════════════════════════════════════════════════════════
 
 
 def main():
@@ -2858,7 +2781,6 @@ def main():
         villa_d, _ = run_adf_all_cached(clean_occ, villa_cfg, villa_keys, data_hash)
         villa_m, _ = run_detect_m_all_cached(clean_occ, villa_cfg, villa_keys, data_hash)
 
-    # ── SARIMA Models ──
     sarima_models: dict = {}
     cache = st.session_state.get("sarima_cache", {})
 
@@ -2878,7 +2800,7 @@ def main():
                 order = ov_["order"]
                 s_order = ov_["seasonal_order"]
                 rmse_ = ov_["rmse_override"]
-                mape_ = ov_["smape_override"]
+                mape_ = ov_["mape_override"]
                 aic_val = ov_["aic_override"]
             else:
                 order = mi.get("order", (1, 1, 1))
