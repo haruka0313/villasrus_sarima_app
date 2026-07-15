@@ -1,8 +1,0 @@
-Villa,Area,Model,RMSE (Test),MAPE (Test),RMSE (Train),MAPE (Train),Kualitas,Overfit?
-Briana,Canggu,"SARIMA(2, 1, 2)×(0, 1, 2, 7)",17.91,19.21,23.41,28.04,Good,OK
-Castello,Canggu,"SARIMA(2, 1, 2)×(1, 1, 2, 7)",42.26,57.46,25.35,40.3,Poor,Overfit
-Elina,Canggu,"SARIMA(2, 1, 1)×(2, 1, 0, 4)",44.29,184.38,10.13,44.87,Poor,Overfit
-Isola,Canggu,"SARIMA(0, 1, 2)×(1, 1, 2, 5)",25.06,29.95,19.4,22.6,Fair,OK
-Eindra,Seminyak,"SARIMA(0, 0, 2)×(0, 1, 2, 6)",19.93,21.78,32.12,36.54,Fair,OK
-Esha,Seminyak,"SARIMA(2, 0, 0)×(2, 1, 0, 4)",31.96,33.25,21.9,23.92,Fair,OK
-Ozamiz,Seminyak,"SARIMA(0, 0, 2)×(0, 1, 2, 6)",16.4,19.76,34.98,45.29,Good,OK
