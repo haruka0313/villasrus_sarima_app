@@ -694,10 +694,6 @@ def compute_mape(actual: np.ndarray, predicted: np.ndarray) -> float:
     return float(np.mean(np.abs(actual - predicted) / denom) * 100)
 
 
-def compute_mape(actual: np.ndarray, predicted: np.ndarray) -> float:
-    return compute_mape(actual, predicted)
-
-
 def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
     villa_d, rows = {}, []
     for villa, series in clean_occ.items():
@@ -974,24 +970,6 @@ def make_forecast_cached(villa: str, order, seasonal_order, data_hash: str, _inf
 
 
 def make_forecast(info: dict) -> dict:
-    villa_key = info.get("villa_key", "")
-    if villa_key and villa_key in SARIMA_OVERRIDE:
-        fo = SARIMA_OVERRIDE[villa_key].get("forecast_override")
-        if fo:
-            idx = pd.DatetimeIndex(fo["dates"])
-            fore_mean = pd.Series(fo["mean"], index=idx).clip(0, 100)
-            fore_lower = pd.Series(fo["lower"], index=idx).clip(0, 100)
-            fore_upper = pd.Series(fo["upper"], index=idx).clip(0, 100)
-            fore_ci = pd.DataFrame(
-                {"lower": fore_lower, "upper": fore_upper}, index=idx
-            )
-            return {
-                "fore_mean": fore_mean,
-                "fore_ci": fore_ci,
-                "used_s_order": info["seasonal_order"],
-                "is_flat": fore_mean.std() < FLAT_STD_THRESH,
-            }
-
     monthly = info["monthly"]
     order, s_order, d = info["order"], info["seasonal_order"], info["d"]
     m = info.get("m", FALLBACK_M)
@@ -2280,31 +2258,6 @@ def page_strategi(
         with tabs[3]:
             section_header("Training Model SARIMA", "🚀")
 
-            with st.expander(
-                "ℹ️ Vila dengan Konfigurasi SARIMA Tervalidasi",
-                expanded=False,
-            ):
-                ov_rows = []
-                for vk, ov in SARIMA_OVERRIDE.items():
-                    ov_rows.append(
-                        {
-                            "Vila": vk.replace("_villas", "").title(),
-                            "Order": str(ov["order"]),
-                            "Seasonal Order": str(ov["seasonal_order"]),
-                            "RMSE (%)": ov["rmse_override"],
-                            "MAPE (%)": ov["mape_override"],
-                        }
-                    )
-                if ov_rows:
-                    st.dataframe(pd.DataFrame(ov_rows), use_container_width=True, hide_index=True)
-                    st.caption(
-                        "Vila di atas menggunakan konfigurasi SARIMA yang sudah divalidasi dari "
-                        "eksperimen notebook v3. Kosongkan `SARIMA_OVERRIDE` jika ingin semua villa "
-                        "pakai auto-training."
-                    )
-                else:
-                    st.info("SARIMA_OVERRIDE kosong — semua villa akan menggunakan auto-training.")
-
             avail_tr = [v for v in villa_cfg if v in clean_occ]
             if not avail_tr:
                 st.warning("Tidak ada vila dengan data. Upload data terlebih dahulu.")
@@ -2318,7 +2271,6 @@ def page_strategi(
                     default=avail_tr,
                     format_func=lambda v: (
                         f"{v.replace('_villas','').title()} "
-                        f"{'' if v in SARIMA_OVERRIDE else '[Auto]'} "
                         f"{'✅' if db_model_exists(v) else '⚠️ belum terlatih'}"
                     ),
                 )
@@ -2367,7 +2319,6 @@ def page_strategi(
                             results.append(
                                 {
                                     "Vila": t_v,
-                                    "Konfigurasi": "✅ Preset" if villa in SARIMA_OVERRIDE else "🔄 Auto",
                                     "Order": f"SARIMA{info_tr['order']}x{info_tr['seasonal_order']}",
                                     "AIC": round(info_tr["model"].aic, 4),
                                     "AIC Valid": "✅" if is_valid_aic(info_tr["model"].aic) else "⚠️",
@@ -2549,19 +2500,10 @@ def main():
         try:
             monthly = clean_occ[villa].resample("MS").mean().dropna()
 
-            if villa in SARIMA_OVERRIDE:
-                ov_ = SARIMA_OVERRIDE[villa]
-                order = ov_["order"]
-                s_order = ov_["seasonal_order"]
-                rmse_ = ov_["rmse_override"]
-                mape_ = ov_["mape_override"]
-                aic_val = ov_["aic_override"]
-            else:
-                order = mi.get("order", (1, 1, 1))
-                s_order = mi.get("seasonal_order", (0, 0, 0, 0))
-                rmse_ = None
-                mape_ = None
-                aic_val = None
+            order = mi.get("order", (1, 1, 1))
+            s_order = mi.get("seasonal_order", (0, 0, 0, 0))
+            rmse_ = mi.get("rmse")
+            mape_ = mi.get("mape")
 
             d_val = mi.get("d", villa_d.get(villa, 1))
             m_val = mi.get("m", villa_m.get(villa, FALLBACK_M))
@@ -2570,7 +2512,7 @@ def main():
 
             built = build_sarima_from_saved(
                 villa, order, s_order, d_val, m_val, color_, title_,
-                rmse_, mape_, aic_val, monthly, data_hash,
+                rmse_, mape_, monthly, data_hash,
             )
             sarima_models[villa] = {**mi, **built}
         except Exception:
