@@ -70,6 +70,13 @@ OCCUPANCY_ATTRS = [
     "available", "black", "occupancy_total",
 ]
 
+# Hasil investigasi manual notebook: potong periode SEBELUM vila mulai beroperasi
+# (occupancy 0% di awal data bukan "hunian rendah", tapi vila belum berjalan).
+VILLA_TREATMENT = {
+    "isola_villas": {"action": "truncate", "start_date": "2023-11-01"},
+    "castello_villas": {"action": "truncate", "start_date": "2023-09-01"},
+}
+
 @st.cache_resource
 def get_supabase() -> Client:
     url = os.getenv("SUPABASE_URL")
@@ -615,7 +622,11 @@ def load_all_data(_villa_cfg_json: str) -> dict:
         df = db_load_data(villa, "occupancy")
         if df is not None:
             try:
-                occ_dict[villa] = clean_occupancy(df)
+                series = clean_occupancy(df)
+                treatment = VILLA_TREATMENT.get(villa)
+                if treatment and treatment["action"] == "truncate":
+                    series = series[treatment["start_date"]:]
+                occ_dict[villa] = series
             except Exception:
                 pass
     return occ_dict
@@ -630,6 +641,9 @@ def adf_test(series: pd.Series) -> dict:
         "stationary": stationary,
         "critical": {k: round(v, 3) for k, v in res[4].items()},
     }
+
+
+VALID_SEASONAL_PERIODS = [3, 4, 6, 12]  # kuartalan, per-4bulan, semesteran, tahunan
 
 
 def detect_m(monthly: pd.Series, area: str = "_default") -> tuple[int, str]:
@@ -649,9 +663,10 @@ def detect_m(monthly: pd.Series, area: str = "_default") -> tuple[int, str]:
 
     sorted_periods = sorted(period_power, key=period_power.get, reverse=True)
 
+    candidate_m = [p for p in VALID_SEASONAL_PERIODS if p <= MAX_M]
     pgram_m = None
     for p in sorted_periods:
-        if 4 <= p <= MAX_M:
+        if p in candidate_m:
             pgram_m = int(p)
             break
 
@@ -659,8 +674,8 @@ def detect_m(monthly: pd.Series, area: str = "_default") -> tuple[int, str]:
     acf_spike_m = None
     try:
         acf_vals, ci = sm_acf(monthly, nlags=nlags, alpha=ACF_ALPHA, fft=True)
-        for lag in range(4, nlags + 1):
-            if 4 <= lag <= MAX_M:
+        for lag in candidate_m:
+            if lag <= nlags:
                 outside = (
                     acf_vals[lag] > ci[lag][1] - acf_vals[lag]
                     or acf_vals[lag] < ci[lag][0] - acf_vals[lag]
@@ -686,12 +701,17 @@ def compute_rmse(actual, predicted) -> float:
     return float(np.sqrt(mean_squared_error(actual, predicted)))
 
 
-def compute_mape(actual: np.ndarray, predicted: np.ndarray) -> float:
+def compute_smape(actual, predicted) -> float:
+    # sMAPE dibatasi 0-200%, lebih stabil saat actual mendekati 0 (occupancy 0%)
     actual = np.array(actual, dtype=float)
     predicted = np.array(predicted, dtype=float)
-    denom = (np.abs(actual) + np.abs(predicted)) / 2.0
-    denom = np.where(denom == 0, 1.0, denom)
-    return float(np.mean(np.abs(actual - predicted) / denom) * 100)
+    denom = np.abs(actual) + np.abs(predicted)
+    terms = np.where(denom > 1e-6, np.abs(actual - predicted) / denom, 0.0)
+    return float(np.mean(terms) * 100)
+
+
+# alias, dipakai di beberapa tempat lama yang masih menyebut "mape" — nilainya sMAPE
+compute_mape = compute_smape
 
 
 def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
@@ -1272,7 +1292,7 @@ def chart_model_fit(info: dict) -> go.Figure:
             line=dict(color=color, width=2.2, dash="dash"),
             mode="lines+markers",
             marker=dict(size=6, symbol="square"),
-            name=f"Prediksi | MAPE={mape_label}",
+            name=f"Prediksi | sMAPE={mape_label}",
             hovertemplate="<b>%{x|%b %Y}</b><br>Prediksi: %{y:.1f}%<extra></extra>",
         )
     )
@@ -1500,11 +1520,11 @@ def model_quality_badge(mape: float) -> tuple[str, str]:
     if np.isnan(mape):
         return "⚪", "Belum dievaluasi"
     if mape < 10:
-        return "🟢", f"Sangat Baik (MAPE={mape:.1f}%)"
+        return "🟢", f"Sangat Baik (sMAPE={mape:.1f}%)"
     elif mape < 20:
-        return "🟡", f"Cukup Baik (MAPE={mape:.1f}%)"
+        return "🟡", f"Cukup Baik (sMAPE={mape:.1f}%)"
     else:
-        return "🔴", f"Perlu Review (MAPE={mape:.1f}%)"
+        return "🔴", f"Perlu Review (sMAPE={mape:.1f}%)"
 
 
 def period_filter(clean_occ: dict, key: str) -> tuple:
@@ -1696,7 +1716,7 @@ def page_dashboard(clean_occ: dict, villa_cfg: dict):
         }
         if is_admin and has_model:
             row["RMSE (%)"] = round(ms.get("rmse", 0) or 0, 2)
-            row["MAPE (%)"] = round(ms.get("mape", 0) or 0, 2)
+            row["sMAPE (%)"] = round(ms.get("mape", 0) or 0, 2)
         rows.append(row)
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -2323,7 +2343,7 @@ def page_strategi(
                                     "AIC": round(info_tr["model"].aic, 4),
                                     "AIC Valid": "✅" if is_valid_aic(info_tr["model"].aic) else "⚠️",
                                     "RMSE (%)": round(info_tr.get("rmse", 0), 4),
-                                    "MAPE (%)": round(info_tr.get("mape", 0), 4),
+                                    "sMAPE (%)": round(info_tr.get("mape", 0), 4),
                                     "Status": "✅ Berhasil",
                                 }
                             )
