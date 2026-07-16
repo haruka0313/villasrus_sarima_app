@@ -697,12 +697,28 @@ def compute_mase(train_actual: np.ndarray, test_actual: np.ndarray, test_pred: n
     mae = np.mean(np.abs(np.asarray(test_actual, dtype=float) - np.asarray(test_pred, dtype=float)))
     return float(mae / scale)
 
+# Override MANUAL: mengunci d (ADF) & m (musiman) per-villa persis sesuai
+# hasil investigasi di notebook, agar grid search SARIMA di app ini memakai
+# d/m yang identik (bukan hasil deteksi otomatis ADF/periodogram di app).
+# Format: villa -> (d, m). Villa yang tidak terdaftar tetap dideteksi otomatis.
+VILLA_D_M_OVERRIDE = {
+    "briana_villas":   (1, 3),
+    "castello_villas": (0, 3),
+    "eindra_villas":   (0, 6),
+    "elina_villas":    (1, 3),
+    "esha_villas":     (0, 4),
+    "isola_villas":    (0, 4),
+    "ozamiz_villas":   (0, 3),
+}
+
 def run_adf_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFrame]:
     villa_d, rows = {}, []
     for villa, series in clean_occ.items():
         monthly = series.resample("MS").mean().dropna()
         res0 = adf_test(monthly)
-        if res0["stationary"]:
+        if villa in VILLA_D_M_OVERRIDE:
+            d, note = VILLA_D_M_OVERRIDE[villa][0], "🔒 Dikunci manual (sesuai notebook)"
+        elif res0["stationary"]:
             d, note = 0, "✅ Stasioner pada level (d=0)"
         else:
             diff1 = monthly.diff().dropna()
@@ -727,7 +743,10 @@ def run_detect_m_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFra
     villa_m, rows = {}, []
     for villa, series in clean_occ.items():
         monthly = series.resample("MS").mean().dropna()
-        m, method = detect_m(monthly)
+        if villa in VILLA_D_M_OVERRIDE:
+            m, method = VILLA_D_M_OVERRIDE[villa][1], "manual"
+        else:
+            m, method = detect_m(monthly)
         villa_m[villa] = m
         rows.append({
             "Vila":    villa.replace("_villas", "").title(),
@@ -735,7 +754,8 @@ def run_detect_m_all(clean_occ: dict, villa_cfg: dict) -> tuple[dict, pd.DataFra
             "N (bln)": len(monthly),
             "m":       m,
             "Metode":  method,
-            "Status":  "✅" if method != "fallback" else "⚠️ Fallback m=12",
+            "Status":  "🔒 Dikunci manual" if method == "manual"
+                       else ("✅" if method != "fallback" else f"⚠️ Fallback m={FALLBACK_M}"),
         })
     return villa_m, pd.DataFrame(rows)
 
