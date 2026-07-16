@@ -39,7 +39,6 @@ load_dotenv()
 # ══════════════════════════════════════════════════════════════
 
 FORECAST_STEPS         = 6
-MIN_SEASONAL_TRAIN     = 30
 FLAT_STD_THRESH        = 1.5
 MIN_CYCLES             = 2
 ACF_ALPHA              = 0.10
@@ -803,7 +802,11 @@ def train_sarima(series: pd.Series, d: int, m: int, color: str, title: str) -> d
             "untuk membangun model final — villa dilewati."
         )
 
-    use_seasonal = n >= MIN_SEASONAL_TRAIN
+    # Seasonal diaktifkan selama data cukup untuk minimal MIN_CYCLES (2) siklus
+    # penuh dari m — bukan ambang tetap 30 bulan. Ini penting untuk villa dengan
+    # data lebih pendek (mis. 26-28 bulan) yang di notebook tetap dimodelkan
+    # dengan komponen musiman.
+    use_seasonal = n >= MIN_CYCLES * m
     split_idx    = max(int(n * 0.85), n - TEST_SIZE_MONTHS)
     train, test  = monthly.iloc[:split_idx], monthly.iloc[split_idx:]
     m_eff        = m if use_seasonal else 1
