@@ -43,7 +43,7 @@ MIN_SEASONAL_TRAIN     = 30
 FLAT_STD_THRESH        = 1.5
 MIN_CYCLES             = 2
 ACF_ALPHA              = 0.10
-FALLBACK_M             = 12
+FALLBACK_M             = 6
 SESSION_DURATION_HOURS = 24 * 30
 
 SESSION_KEY  = "_sess_token"
@@ -615,7 +615,7 @@ def adf_test(series: pd.Series) -> dict:
 # triwulan, semesteran, tahunan). Periode lain hasil periodogram/ACF
 # yang tidak "cukup dekat" dengan salah satu kandidat ini diabaikan,
 # meski secara murni statistik mungkin lebih dominan.
-SEASONAL_M_CANDIDATES = [3, 4, 6, 12]
+SEASONAL_M_CANDIDATES = [3, 4, 6]
 SEASONAL_M_SNAP_TOL   = 1  # toleransi pembulatan periode ke kandidat terdekat
 
 def detect_m(monthly: pd.Series) -> tuple[int, str]:
@@ -1941,7 +1941,7 @@ def page_strategi(
                 title_v = villa.replace("_villas", "").title()
                 area    = villa_cfg.get(villa, {}).get("area", "").title()
                 d_val   = villa_d.get(villa, 1)
-                m_val   = villa_m.get(villa, 12)
+                m_val   = villa_m.get(villa, FALLBACK_M)
                 mean_occ = monthly.mean()
                 n_months = len(monthly)
                 occ_icon, occ_lbl, _ = status_badge(mean_occ)
@@ -2156,7 +2156,7 @@ def page_strategi(
         #                     info_tr = train_sarima(
         #                         clean_occ[villa],
         #                         villa_d.get(villa, 1),
-        #                         villa_m.get(villa, 12),
+        #                         villa_m.get(villa, FALLBACK_M),
         #                         villa_cfg.get(villa, {}).get("color", "#2563EB"),
         #                         t_v,
         #                     )
@@ -2342,7 +2342,7 @@ def page_strategi(
                             info_tr = train_sarima(
                                 clean_occ[villa],
                                 villa_d.get(villa, 1),
-                                villa_m.get(villa, 12),
+                                villa_m.get(villa, FALLBACK_M),
                                 villa_cfg.get(villa, {}).get("color", "#2563EB"),
                                 t_v,
                             )
