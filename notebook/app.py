@@ -1181,9 +1181,15 @@ def chart_residual(info: dict) -> go.Figure:
     resid = info["model"].resid.dropna()
     color = info["color"]
     title = info["title"]
-    lb     = acorr_ljungbox(resid, lags=[12, 24], return_df=True)
-    p12    = lb.loc[12, "lb_pvalue"]
-    _, p_n = stats.shapiro(resid[:50])
+    safe_lags = sorted(set(l for l in LJUNG_BOX_LAGS if l < len(resid)))
+    if not safe_lags:
+        safe_lags = [min(10, max(1, len(resid) - 1))]
+    lb     = acorr_ljungbox(resid, lags=safe_lags, return_df=True)
+    p12    = lb["lb_pvalue"].iloc[-1]
+    if len(resid) >= 3:
+        _, p_n = stats.shapiro(resid[:50])
+    else:
+        p_n = float("nan")
     fig = make_subplots(rows=1, cols=3,
         subplot_titles=["Residual atas Waktu", "Distribusi Residual", "Q-Q Plot"],
         horizontal_spacing=0.09)
@@ -1208,7 +1214,7 @@ def chart_residual(info: dict) -> go.Figure:
     lb_lbl = "✅ LB OK" if p12 > 0.05 else "⚠️ Autokorelasi"
     n_lbl  = "✅ Normal" if p_n > 0.05 else "⚠️ Non-normal"
     fig.update_layout(
-        title=dict(text=f"{title} — Diagnostik Residual | {lb_lbl} (p12={p12:.3f}) | Shapiro p={p_n:.3f} {n_lbl}",
+        title=dict(text=f"{title} — Diagnostik Residual | {lb_lbl} (lag={safe_lags[-1]}, p={p12:.3f}) | Shapiro p={p_n:.3f} {n_lbl}",
             font=dict(size=12, color="#1E3A5F")),
         height=310,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(248,250,252,1)",
