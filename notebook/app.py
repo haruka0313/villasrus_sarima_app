@@ -2148,7 +2148,7 @@ def page_manajemen_data(villa_cfg: dict):
                     else:
                         st.success(f"✅ Data baru disimpan: **{n_rows:,} baris**.")
                     st.info(
-                        "💡 Latih model di menu **Strategi Hunian & Harga → Train Model**."
+                        "💡 Latih model di menu **Prediksi Hunian Villas R Us (metode SARIMA) → Train Model**."
                     )
             except Exception as e:
                 st.error(f"❌ Gagal memproses: {e}")
@@ -2354,7 +2354,7 @@ def page_strategi(
 ):
     is_admin = st.session_state.user.get("role") == "admin"
     st.markdown(
-        "<h1 style='color:#1E3A5F;'>📊 Strategi Hunian & Harga</h1>"
+        "<h1 style='color:#1E3A5F;'>📊 Prediksi Hunian Villas R Us (metode SARIMA)</h1>"
         "<p style='color:#6B7280;margin-bottom:20px;'>"
         "Prediksi tingkat hunian SARIMA dan analisis keterkaitan harga historis (ADR).</p>",
         unsafe_allow_html=True,
@@ -3422,7 +3422,7 @@ def main():
                 "",
                 [
                     "🏠 Dashboard Utama",
-                    "📊 Strategi Hunian & Harga",
+                    "📊 Prediksi Hunian Villas R Us (metode SARIMA)",
                     "📂 Manajemen Data",
                 ],
                 label_visibility="collapsed",
@@ -3432,11 +3432,11 @@ def main():
                 "",
                 [
                     "🏠 Dashboard Utama",
-                    "📊 Strategi Hunian & Harga",
+                    "📊 Prediksi Hunian Villas R Us (metode SARIMA)",
                 ],
                 label_visibility="collapsed",
             )
-        if nav in ["🏠 Dashboard Utama", "📊 Strategi Hunian & Harga"]:
+        if nav in ["🏠 Dashboard Utama", "📊 Prediksi Hunian Villas R Us (metode SARIMA)"]:
             st.divider()
             st.markdown(
                 "<div style='font-size:12px;font-weight:600;color:#374151;"
